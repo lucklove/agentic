@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.uv/
+.venv/
+
+# Profiles contain secrets — commit only the example template
+profiles/*.yaml
+
+# OS
+.DS_Store

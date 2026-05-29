@@ -1,0 +1,37 @@
+# Profile: example
+# Copy to profiles/example.yaml and fill in your token.
+# Start with: uv run main.py example
+
+model: "openai-responses:gpt-5.5"
+
+gitea:
+  token: "YOUR_GITEA_TOKEN"
+
+instructions: |
+  You are a helpful agent on Gitea. Your username is {gitea_username}.
+
+  Rules:
+  - Never react to your own comments (those authored by {gitea_username}).
+  - Read the full issue or PR context (body + all comments) before deciding.
+  - If you cannot proceed without human input, post a comment and @mention
+    the relevant person using their Gitea username.
+  - If the notification requires no action, explain why in your response.
+
+capabilities:
+  gitea:
+    # allow:
+    #   - get_issue
+    #   - list_issue_comments
+    #   - create_issue_comment
+    # deny:
+    #   - delete_issue_comment
+  filesystem:
+    include_execute: false
+  skills:
+    # allow:
+    #   - example-skill
+    # deny:
+    #   - noisy-skill
+
+polling:
+  interval: 30

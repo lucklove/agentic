@@ -1,0 +1,15 @@
+# Global configuration shared across all profiles.
+# Profile-specific settings (token, model, instructions, …) live in profiles/<name>.yaml.
+
+gitea:
+  base_url: "http://gitea.ai"
+  mcp:
+    # Command to launch the Gitea MCP server via stdio.
+    # Environment variables GITEA_HOST and GITEA_ACCESS_TOKEN are injected
+    # automatically per-profile at runtime.
+    command: ["go", "run", "gitea.com/gitea/gitea-mcp@latest", "-t", "stdio"]
+
+# Directory that contains all available skills (subdirs with SKILL.md).
+# SkillsCapability will discover skills from here; each profile filters
+# by name via capabilities.skills.names.
+skills_dir: "./skills"
