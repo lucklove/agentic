@@ -36,6 +36,20 @@ from capabilities.base import make_name_filter
 __all__ = ["GiteaMCPCapability", "make_gitea_capability"]
 
 
+_GITEA_INSTRUCTIONS = """\
+## Gitea functions
+
+All Gitea operations MUST be performed exclusively through the Python functions \
+whose names start with `gitea_`.
+
+If a required Gitea action has no corresponding `gitea_` function available, \
+STOP and report that the capability is missing — do NOT attempt to work around \
+the gap by calling HTTP APIs, running curl/wget, or using any other mechanism. \
+A missing function means the current agent profile intentionally does not grant \
+that permission.
+"""
+
+
 @dataclass
 class GiteaMCPCapability(AbstractCapability[Any]):
     """Gitea MCP capability with optional tool-name filtering.
@@ -48,6 +62,9 @@ class GiteaMCPCapability(AbstractCapability[Any]):
 
     _server: MCPServerStdio
     _filter: Callable[[Any], bool] | None  # None → expose all tools
+
+    def get_instructions(self) -> str:
+        return _GITEA_INSTRUCTIONS
 
     def get_toolset(self) -> AgentToolset[Any]:
         if self._filter is None:
@@ -69,8 +86,13 @@ def make_gitea_capability(
         env={
             "GITEA_HOST": base_url,
             "GITEA_ACCESS_TOKEN": token,
+            # Bypass Go module proxy and checksum DB for the local gitea.ai domain
+            # (which may only be resolvable via /etc/hosts and not reachable by the proxy).
+            "GOPRIVATE": "gitea.ai",
+            "GONOSUMDB": "gitea.ai",
+            "GOINSECURE": "gitea.ai",
         },
-        include_instructions=True,
+        include_instructions=False,
         tool_prefix="gitea",
     )
     return GiteaMCPCapability(
