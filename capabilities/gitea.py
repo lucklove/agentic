@@ -71,6 +71,7 @@ def make_gitea_capability(
             "GITEA_ACCESS_TOKEN": token,
         },
         include_instructions=True,
+        tool_prefix="gitea",
     )
     return GiteaMCPCapability(
         _server=server,

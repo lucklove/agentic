@@ -20,11 +20,11 @@ instructions: |
 capabilities:
   gitea:
     # allow:
-    #   - get_issue
-    #   - list_issue_comments
-    #   - create_issue_comment
+    #   - gitea_get_issue
+    #   - gitea_list_issue_comments
+    #   - gitea_create_issue_comment
     # deny:
-    #   - delete_issue_comment
+    #   - gitea_delete_issue_comment
   filesystem:
     include_execute: false
   skills:
