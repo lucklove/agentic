@@ -25,7 +25,7 @@ def make_name_filter(
       neither       →  None  (caller keeps everything)
     """
     allow = frozenset(opts.get("allow", []))
-    deny  = frozenset(opts.get("deny",  []))
+    deny = frozenset(opts.get("deny", []))
 
     if allow:
         effective = allow - deny

@@ -23,7 +23,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
-from pydantic_ai import Agent
+from pydantic_ai import Agent, AgentRetries
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai_harness import CodeMode
 from pydantic_ai_skills import SkillsCapability, discover_skills
@@ -93,7 +93,7 @@ def make_agent(
     registry = _build_registry(global_cfg, profile)
 
     # CodeMode is always first — mandatory, not configurable per profile.
-    capabilities: list[AbstractCapability] = [CodeMode()]
+    capabilities: list[AbstractCapability[Any]] = [CodeMode()]
 
     # Append profile-declared capabilities in declaration order.
     capabilities += [
@@ -110,5 +110,5 @@ def make_agent(
         deps_type=AgentDeps,
         capabilities=capabilities,
         instructions=instructions,
-        retries={"output": 3},
+        retries=AgentRetries(output=3),
     )
