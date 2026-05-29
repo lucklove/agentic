@@ -21,6 +21,7 @@ not user-configurable.
 from __future__ import annotations
 
 from pathlib import Path
+from string import Template
 from typing import Any, Callable
 
 from pydantic_ai import Agent, AgentRetries
@@ -29,10 +30,11 @@ from pydantic_ai_harness import CodeMode
 from pydantic_ai_skills import SkillsCapability, discover_skills
 
 from capabilities.base import make_name_filter
-from capabilities.filesystem import AgentDeps, make_fs_capability
+from capabilities.filesystem import make_fs_capability
 from capabilities.gitea import make_gitea_capability
 from capabilities.memory import Memory
 from config import GlobalConfig, ProfileConfig
+from deps import AgentDeps
 
 __all__ = ["make_agent"]
 
@@ -88,16 +90,15 @@ def _build_registry(
 def make_agent(
     profile: ProfileConfig,
     global_cfg: GlobalConfig,
-    gitea_username: str,
+    deps: AgentDeps,
 ) -> Agent[AgentDeps, str]:
     """Build and return an Agent configured from *profile*.
 
     Args:
         profile:        Loaded profile config (model, capabilities, instructions…).
         global_cfg:     Global config (Gitea base URL, MCP command, skills dir).
-        gitea_username: The Gitea login name for the token in this profile,
-                        resolved at startup. Substituted into instructions as
-                        ``{gitea_username}``.
+        deps:           Shared runtime deps. ``gitea_username`` is substituted
+                        into instructions as ``$gitea_username``.
     """
     registry = _build_registry(global_cfg, profile)
 
@@ -111,7 +112,9 @@ def make_agent(
         if name in registry
     ]
 
-    instructions = profile.instructions.replace("{gitea_username}", gitea_username)
+    instructions = Template(profile.instructions).safe_substitute(
+        gitea_username=deps.gitea_username
+    )
 
     return Agent(
         profile.model,

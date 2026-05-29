@@ -28,9 +28,11 @@ from pathlib import Path
 
 import httpx
 import logfire
+from pydantic_ai_backends import LocalBackend
 
 from agent_factory import make_agent
 from config import load_global_config, load_profile
+from deps import AgentDeps
 from poller import poll_forever
 
 _HERE = Path(__file__).parent
@@ -54,13 +56,15 @@ async def run(profile_name: str) -> None:
     global_cfg = load_global_config(_HERE / "agentic.yaml")
     profile = load_profile(_HERE / "profiles" / f"{profile_name}.yaml")
     username = await _resolve_username(global_cfg.gitea.base_url, profile.gitea.token)
-    agent = make_agent(profile, global_cfg, username)
+    deps = AgentDeps(backend=LocalBackend("/"), gitea_username=username)
+    agent = make_agent(profile, global_cfg, deps)
 
     await poll_forever(
         agent,
         base_url=global_cfg.gitea.base_url,
         token=profile.gitea.token,
         interval=profile.polling.interval,
+        deps=deps,
     )
 
 
