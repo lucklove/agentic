@@ -55,10 +55,6 @@ class GiteaMCPCapability(AbstractCapability[Any]):
         f = self._filter  # capture non-None for the lambda
         return FilteredToolset(self._server, filter_func=lambda _ctx, tool: f(tool))
 
-    def get_instructions(self) -> str:
-        # The MCP server injects its own instructions via include_instructions=True.
-        return ""
-
 
 def make_gitea_capability(
     base_url: str,
