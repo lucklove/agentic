@@ -65,7 +65,7 @@ class MemoryEntry:
     tags: list[str] = field(default_factory=lambda: list[str]())
     """Optional tags for categorization and search."""
 
-    namespace: tuple[str, ...] = ('global',)
+    namespace: tuple[str, ...] = ("global",)
     """Hierarchical namespace for this memory.
 
     A tuple of strings forming a path-like namespace (e.g., `('users', 'alice')`,
@@ -77,10 +77,14 @@ class MemoryEntry:
     expires_at: str | None = None
     """Optional ISO 8601 expiration timestamp. `None` means no expiry."""
 
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
     """ISO 8601 timestamp of when the memory was first created."""
 
-    updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
     """ISO 8601 timestamp of the last update."""
 
     summary: str | None = None
@@ -102,7 +106,7 @@ class MemoryEntry:
         """Validate `char_limit` immediately so dev errors surface at construction."""
         if self.char_limit is not None and len(self.content) > self.char_limit:
             raise ValueError(
-                f'MemoryEntry {self.key!r} content is {len(self.content)} chars, exceeds char_limit={self.char_limit}',
+                f"MemoryEntry {self.key!r} content is {len(self.content)} chars, exceeds char_limit={self.char_limit}",
             )
 
     def is_expired(self) -> bool:
@@ -121,36 +125,36 @@ class MemoryEntry:
     def to_dict(self) -> MemoryEntryDict:
         """Serialize to a plain dict for JSON storage."""
         return {
-            'key': self.key,
-            'content': self.content,
-            'tags': self.tags,
-            'namespace': list(self.namespace),
-            'expires_at': self.expires_at,
-            'created_at': self.created_at,
-            'updated_at': self.updated_at,
-            'summary': self.summary,
-            'metadata': self.metadata,
-            'read_only': self.read_only,
-            'char_limit': self.char_limit,
-            'importance': self.importance,
+            "key": self.key,
+            "content": self.content,
+            "tags": self.tags,
+            "namespace": list(self.namespace),
+            "expires_at": self.expires_at,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "summary": self.summary,
+            "metadata": self.metadata,
+            "read_only": self.read_only,
+            "char_limit": self.char_limit,
+            "importance": self.importance,
         }
 
     @classmethod
     def from_dict(cls, data: MemoryEntryDict) -> MemoryEntry:
         """Deserialize from a plain dict."""
         return cls(
-            key=data['key'],
-            content=data['content'],
-            tags=data.get('tags', []),
-            namespace=tuple(data.get('namespace', ('global',))),
-            expires_at=data.get('expires_at'),
-            created_at=data.get('created_at', ''),
-            updated_at=data.get('updated_at', ''),
-            summary=data.get('summary'),
-            metadata=data.get('metadata', {}),
-            read_only=data.get('read_only', False),
-            char_limit=data.get('char_limit'),
-            importance=data.get('importance'),
+            key=data["key"],
+            content=data["content"],
+            tags=data.get("tags", []),
+            namespace=tuple(data.get("namespace", ("global",))),
+            expires_at=data.get("expires_at"),
+            created_at=data.get("created_at", ""),
+            updated_at=data.get("updated_at", ""),
+            summary=data.get("summary"),
+            metadata=data.get("metadata", {}),
+            read_only=data.get("read_only", False),
+            char_limit=data.get("char_limit"),
+            importance=data.get("importance"),
         )
 
 
@@ -166,7 +170,9 @@ def _score_entry(entry: MemoryEntry, words: list[str]) -> int:
     for word in words:
         # Use a boundary pattern that also treats _ and - as separators.
         escaped = re.escape(word)
-        pattern = re.compile(rf'(?<![a-zA-Z0-9]){escaped}(?![a-zA-Z0-9])', re.IGNORECASE)
+        pattern = re.compile(
+            rf"(?<![a-zA-Z0-9]){escaped}(?![a-zA-Z0-9])", re.IGNORECASE
+        )
         if pattern.search(entry.key):
             score += 1
         if pattern.search(entry.content):
@@ -176,7 +182,7 @@ def _score_entry(entry: MemoryEntry, words: list[str]) -> int:
     return score
 
 
-RecencyScorer: TypeAlias = Callable[['MemoryEntry'], float]
+RecencyScorer: TypeAlias = Callable[["MemoryEntry"], float]
 """Callable that maps a `MemoryEntry` to a recency score (typically in `[0, 1]`).
 
 Added to the keyword-match score in `MemoryStore.search` to bias results toward fresher entries.
@@ -184,7 +190,9 @@ Use the built-in `exponential_decay` factory or supply any callable.
 """
 
 
-def exponential_decay(*, half_life_days: float = 30.0, weight: float = 1.0) -> RecencyScorer:
+def exponential_decay(
+    *, half_life_days: float = 30.0, weight: float = 1.0
+) -> RecencyScorer:
     """Build a recency scorer with exponential decay over `entry.updated_at`.
 
     Args:
@@ -226,11 +234,11 @@ def _saves_in_history(messages: list[ModelMessage]) -> dict[str, str]:
         for part in msg.parts:
             if not isinstance(part, ToolCallPart):
                 continue
-            if part.tool_name != 'save_memory':
+            if part.tool_name != "save_memory":
                 continue
             args = part.args_as_dict()
-            key = args.get('key')
-            content = args.get('content')
+            key = args.get("key")
+            content = args.get("content")
             if isinstance(key, str) and isinstance(content, str):
                 last[key] = content
     return last
@@ -244,7 +252,9 @@ def _matches_filter(entry: MemoryEntry, filter_: dict[str, object]) -> bool:
     return True
 
 
-def _namespace_matches(entry_ns: tuple[str, ...], filter_prefix: tuple[str, ...]) -> bool:
+def _namespace_matches(
+    entry_ns: tuple[str, ...], filter_prefix: tuple[str, ...]
+) -> bool:
     """Return True if `entry_ns` starts with `filter_prefix`.
 
     Empty `filter_prefix` matches any namespace (use `None` in callers to mean
@@ -363,7 +373,9 @@ class _BaseDictStore:
 
     def _gc_expired(self) -> None:
         """Drop expired entries from the backing dict."""
-        expired_keys = [key for key, entry in self._entries.items() if entry.is_expired()]
+        expired_keys = [
+            key for key, entry in self._entries.items() if entry.is_expired()
+        ]
         for key in expired_keys:
             del self._entries[key]
 
@@ -401,7 +413,9 @@ class _BaseDictStore:
         for entry in self._entries.values():
             if entry.is_expired():
                 continue
-            if namespace is not None and not _namespace_matches(entry.namespace, namespace):
+            if namespace is not None and not _namespace_matches(
+                entry.namespace, namespace
+            ):
                 continue
             if filter is not None and not _matches_filter(entry, filter):
                 continue
@@ -434,7 +448,9 @@ class _BaseDictStore:
                 ns = ns[:max_depth]
             if prefix is not None and not _namespace_matches(ns, prefix):
                 continue
-            if suffix is not None and (len(ns) < len(suffix) or ns[-len(suffix) :] != suffix):
+            if suffix is not None and (
+                len(ns) < len(suffix) or ns[-len(suffix) :] != suffix
+            ):
                 continue
             seen.add(ns)
         return sorted(seen)
@@ -466,20 +482,31 @@ class FileMemoryStore(_BaseDictStore):
     def _load(self) -> None:
         if self._path.exists():
             try:
-                raw: dict[str, MemoryEntryDict] = json.loads(self._path.read_text(encoding='utf-8'))
-                if not isinstance(raw, dict):  # pyright: ignore[reportUnnecessaryIsInstance]
-                    logger.warning('Memory file %s contains non-dict JSON, starting empty', self._path)
+                raw: dict[str, MemoryEntryDict] = json.loads(
+                    self._path.read_text(encoding="utf-8")
+                )
+                if not isinstance(
+                    raw, dict
+                ):  # pyright: ignore[reportUnnecessaryIsInstance]
+                    logger.warning(
+                        "Memory file %s contains non-dict JSON, starting empty",
+                        self._path,
+                    )
                     return
-                self._entries = {key: MemoryEntry.from_dict(val) for key, val in raw.items()}
+                self._entries = {
+                    key: MemoryEntry.from_dict(val) for key, val in raw.items()
+                }
             except (json.JSONDecodeError, KeyError, TypeError) as e:
-                logger.warning('Failed to load memory file %s: %s, starting empty', self._path, e)
+                logger.warning(
+                    "Failed to load memory file %s: %s, starting empty", self._path, e
+                )
                 self._entries = {}
 
     def _save(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._gc_expired()
         data = {key: entry.to_dict() for key, entry in self._entries.items()}
-        self._path.write_text(json.dumps(data, indent=2), encoding='utf-8')
+        self._path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     def put(self, entry: MemoryEntry) -> None:
         """Store or update a memory entry."""
@@ -503,15 +530,19 @@ def format_entry(entry: MemoryEntry, *, prefer_summary: bool = False) -> str:
             in place of the full content. Used by `Memory.build_instructions`
             to keep system-prompt injection short. Defaults to False (full content).
     """
-    body = entry.summary if (prefer_summary and entry.summary is not None) else entry.content
-    line = f'[{entry.key}] {body}'
+    body = (
+        entry.summary
+        if (prefer_summary and entry.summary is not None)
+        else entry.content
+    )
+    line = f"[{entry.key}] {body}"
     extras: list[str] = []
     if entry.tags:
         extras.append(f'tags: {", ".join(entry.tags)}')
-    if entry.namespace != ('global',):
+    if entry.namespace != ("global",):
         extras.append(f'namespace: {"/".join(entry.namespace)}')
     if entry.expires_at is not None:
-        extras.append(f'expires: {entry.expires_at}')
+        extras.append(f"expires: {entry.expires_at}")
     if extras:
         line += f' ({"; ".join(extras)})'
     return line
@@ -593,14 +624,14 @@ class Memory(AbstractCapability[AgentDepsT]):
     @classmethod
     def get_serialization_name(cls) -> str | None:
         """Return the name used for spec serialization."""
-        return 'Memory'
+        return "Memory"
 
     @classmethod
     def from_spec(
         cls,
         *,
-        backend: str = 'memory',
-        path: str = '.memories.json',
+        backend: str = "memory",
+        path: str = ".memories.json",
         inject_memories_in_instructions: bool = True,
         max_instructions_memories: int = 20,
     ) -> Memory[Any]:
@@ -613,12 +644,14 @@ class Memory(AbstractCapability[AgentDepsT]):
             max_instructions_memories: Maximum memories to inject into the system prompt.
         """
         store: MemoryStore
-        if backend == 'memory':
+        if backend == "memory":
             store = DictMemoryStore()
-        elif backend == 'file':
+        elif backend == "file":
             store = FileMemoryStore(path)
         else:
-            raise ValueError(f'Unknown memory backend: {backend!r}. Use "memory" or "file".')
+            raise ValueError(
+                f'Unknown memory backend: {backend!r}. Use "memory" or "file".'
+            )
         return cls(
             store=store,
             inject_memories_in_instructions=inject_memories_in_instructions,
@@ -638,19 +671,21 @@ class Memory(AbstractCapability[AgentDepsT]):
         - Pinned entries are listed first.
         """
         parts: list[str] = [
-            'You have access to a persistent memory system. '
-            'Use it to save important information that should be remembered across conversations.',
+            "You have access to a persistent memory system. "
+            "Use it to save important information that should be remembered across conversations.",
         ]
         if not self.inject_memories_in_instructions:
-            return '\n'.join(parts)
+            return "\n".join(parts)
 
         entries = self.store.list_all()
         if not entries:
-            return '\n'.join(parts)
+            return "\n".join(parts)
 
-        parts.append('\nCurrently stored memories:')
+        parts.append("\nCurrently stored memories:")
 
-        recent_saves: dict[str, str] = _saves_in_history(ctx.messages) if self.dedup_recent_saves else {}
+        recent_saves: dict[str, str] = (
+            _saves_in_history(ctx.messages) if self.dedup_recent_saves else {}
+        )
 
         # Pinned first, then the rest in store order
         ordered = sorted(entries, key=lambda e: not e.read_only)
@@ -664,15 +699,18 @@ class Memory(AbstractCapability[AgentDepsT]):
                 saved_content = recent_saves.get(entry.key)
                 if saved_content is not None and saved_content == entry.content:
                     continue
-            line = f'- {format_entry(entry, prefer_summary=True)}'
-            line_bytes = len(line.encode('utf-8'))
+            line = f"- {format_entry(entry, prefer_summary=True)}"
+            line_bytes = len(line.encode("utf-8"))
             if entry.read_only:
                 formatted.append(line)
                 used_bytes += line_bytes
                 continue
             if consumed_non_pinned >= self.max_instructions_memories:
                 break
-            if self.byte_budget is not None and used_bytes + line_bytes > self.byte_budget:
+            if (
+                self.byte_budget is not None
+                and used_bytes + line_bytes > self.byte_budget
+            ):
                 break
             formatted.append(line)
             used_bytes += line_bytes
@@ -682,8 +720,10 @@ class Memory(AbstractCapability[AgentDepsT]):
 
         overflow = len(entries) - len(formatted)
         if overflow > 0:
-            parts.append(f'... and {overflow} more (use list_memories or search_memories to see all).')
-        return '\n'.join(parts)
+            parts.append(
+                f"... and {overflow} more (use list_memories or search_memories to see all)."
+            )
+        return "\n".join(parts)
 
     def get_instructions(self) -> AgentInstructions[AgentDepsT] | None:
         """Return dynamic instructions that include stored memories."""
@@ -724,13 +764,13 @@ class Memory(AbstractCapability[AgentDepsT]):
             existing = store.get(key)
 
             if existing is not None and existing.read_only:
-                return f'Memory {key!r} is read-only and cannot be modified.'
+                return f"Memory {key!r} is read-only and cannot be modified."
 
             # Dedup warning: check for similar keys among existing entries
             for existing_entry in store.list_all():
                 if _simple_similarity(key, existing_entry.key):
                     logger.warning(
-                        'New memory key %r is very similar to existing key %r — possible duplicate',
+                        "New memory key %r is very similar to existing key %r — possible duplicate",
                         key,
                         existing_entry.key,
                     )
@@ -739,7 +779,7 @@ class Memory(AbstractCapability[AgentDepsT]):
             if ttl_minutes is not None:
                 expires_at = (now + timedelta(minutes=ttl_minutes)).isoformat()
 
-            ns: tuple[str, ...] = tuple(namespace) if namespace else ('global',)
+            ns: tuple[str, ...] = tuple(namespace) if namespace else ("global",)
             entry = MemoryEntry(
                 key=key,
                 content=content,
@@ -752,7 +792,7 @@ class Memory(AbstractCapability[AgentDepsT]):
                 importance=importance,
             )
             store.put(entry)
-            return f'Memory saved: {key}'
+            return f"Memory saved: {key}"
 
         def recall_memory(key: str) -> str:
             """Recall a specific memory by its key.
@@ -762,7 +802,7 @@ class Memory(AbstractCapability[AgentDepsT]):
             """
             entry = store.get(key)
             if entry is None:
-                return f'No memory found for key: {key}'
+                return f"No memory found for key: {key}"
             return format_entry(entry)
 
         def search_memories(query: str, namespace: list[str] | None = None) -> str:
@@ -775,8 +815,8 @@ class Memory(AbstractCapability[AgentDepsT]):
             ns: tuple[str, ...] | None = tuple(namespace) if namespace else None
             results = store.search(query, namespace=ns, recency_scorer=recency_scorer)
             if not results:
-                return f'No memories found matching: {query}'
-            return '\n'.join(format_entry(entry) for entry in results)
+                return f"No memories found matching: {query}"
+            return "\n".join(format_entry(entry) for entry in results)
 
         def list_memories(namespace: list[str] | None = None) -> str:
             """List all stored memories, optionally filtered by namespace prefix.
@@ -787,8 +827,8 @@ class Memory(AbstractCapability[AgentDepsT]):
             ns: tuple[str, ...] | None = tuple(namespace) if namespace else None
             entries = store.list_all(namespace=ns)
             if not entries:
-                return 'No memories stored.'
-            return '\n'.join(format_entry(entry) for entry in entries)
+                return "No memories stored."
+            return "\n".join(format_entry(entry) for entry in entries)
 
         def delete_memory(key: str) -> str:
             """Delete a memory by its key.
@@ -798,18 +838,36 @@ class Memory(AbstractCapability[AgentDepsT]):
             """
             entry = store.get(key)
             if entry is not None and entry.read_only:
-                return f'Memory {key!r} is read-only and cannot be deleted.'
+                return f"Memory {key!r} is read-only and cannot be deleted."
             if store.delete(key):
-                return f'Memory deleted: {key}'
-            return f'No memory found for key: {key}'
+                return f"Memory deleted: {key}"
+            return f"No memory found for key: {key}"
 
         descs = self.tool_descriptions
         return FunctionToolset(
             [
-                Tool(save_memory, takes_ctx=False, description=descs.get('save_memory')),
-                Tool(recall_memory, takes_ctx=False, description=descs.get('recall_memory')),
-                Tool(search_memories, takes_ctx=False, description=descs.get('search_memories')),
-                Tool(list_memories, takes_ctx=False, description=descs.get('list_memories')),
-                Tool(delete_memory, takes_ctx=False, description=descs.get('delete_memory')),
+                Tool(
+                    save_memory, takes_ctx=False, description=descs.get("save_memory")
+                ),
+                Tool(
+                    recall_memory,
+                    takes_ctx=False,
+                    description=descs.get("recall_memory"),
+                ),
+                Tool(
+                    search_memories,
+                    takes_ctx=False,
+                    description=descs.get("search_memories"),
+                ),
+                Tool(
+                    list_memories,
+                    takes_ctx=False,
+                    description=descs.get("list_memories"),
+                ),
+                Tool(
+                    delete_memory,
+                    takes_ctx=False,
+                    description=descs.get("delete_memory"),
+                ),
             ],
         )

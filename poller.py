@@ -40,7 +40,7 @@ def _build_context_message(notif: dict[str, Any]) -> str:
     """Render the initial user message for an agent run from a notification."""
     subject = notif["subject"]
     repo: str = notif["repository"]["full_name"]
-    subject_type: str = subject["type"]           # "Issue" or "Pull"
+    subject_type: str = subject["type"]  # "Issue" or "Pull"
     number: str = _parse_number(subject["url"])
     title: str = subject["title"]
 
@@ -92,10 +92,7 @@ async def poll_once(
     resp.raise_for_status()
     notifications: list[dict[str, Any]] = resp.json()
 
-    relevant = (
-        n for n in notifications
-        if n["subject"]["type"] in _SUBJECT_TYPES
-    )
+    relevant = (n for n in notifications if n["subject"]["type"] in _SUBJECT_TYPES)
 
     for notif in relevant:
         await _handle_notification(agent, http, notif)

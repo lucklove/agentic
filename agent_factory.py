@@ -77,7 +77,9 @@ def _build_registry(
         "memory": lambda opts: Memory.from_spec(
             backend=opts.get("backend", "memory"),
             path=opts.get("path", ".memories.json"),
-            inject_memories_in_instructions=opts.get("inject_memories_in_instructions", True),
+            inject_memories_in_instructions=opts.get(
+                "inject_memories_in_instructions", True
+            ),
             max_instructions_memories=opts.get("max_instructions_memories", 20),
         ),
     }
