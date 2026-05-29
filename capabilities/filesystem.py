@@ -11,25 +11,12 @@ option configured per-profile in the capabilities block:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-from pydantic_ai_backends import ConsoleCapability, LocalBackend
+from pydantic_ai_backends import ConsoleCapability
 from pydantic_ai_backends.permissions.presets import PERMISSIVE_RULESET
 
 from capabilities.base import CapabilityWithTools
 
-__all__ = ["AgentDeps", "make_fs_capability"]
-
-
-@dataclass
-class AgentDeps:
-    """Runtime deps passed to every agent.run() call.
-
-    ``backend`` satisfies the ``ConsoleDeps`` protocol expected by the
-    filesystem toolset so the agent can read/write files.
-    """
-
-    backend: LocalBackend
+__all__ = ["make_fs_capability"]
 
 
 class _FSCapability(CapabilityWithTools, ConsoleCapability):
