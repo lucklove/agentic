@@ -125,8 +125,11 @@ class NotificationContext:
         reviews: list[dict[str, Any]] = resp.json()
         return {user for user in (_login(review.get("user")) for review in reviews) if user}
 
-    async def is_relevant_to_agent(self, gitea_username: str) -> bool:
-        subject = await self.get_subject()
+    async def is_subject_relevant_to_agent(
+        self,
+        subject: dict[str, Any],
+        gitea_username: str,
+    ) -> bool:
         users = _collect_users(subject)
 
         if self.subject_type == "Pull" and gitea_username not in users:
@@ -199,7 +202,19 @@ async def _handle_notification(
             number=notif_ctx.number,
             notification_id=notif_ctx.id,
         ):
-            if not await notif_ctx.is_relevant_to_agent(deps.gitea_username):
+            subject = await notif_ctx.get_subject()
+            if _is_closed(subject):
+                logfire.info(
+                    "skip notification for closed subject",
+                    repo=notif_ctx.repo_full_name,
+                    number=notif_ctx.number,
+                )
+                return
+
+            if not await notif_ctx.is_subject_relevant_to_agent(
+                subject,
+                deps.gitea_username,
+            ):
                 logfire.info(
                     "skip notification unrelated to agent",
                     repo=notif_ctx.repo_full_name,
