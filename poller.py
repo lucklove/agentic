@@ -265,8 +265,6 @@ async def poll_once(
 
 async def poll_forever(
     agent: Agent[AgentDeps, str],
-    base_url: str,
-    token: str,
     interval: int,
     deps: AgentDeps,
 ) -> None:
@@ -277,17 +275,15 @@ async def poll_forever(
 
     Args:
         agent:    The configured pydantic-ai Agent.
-        base_url: Gitea instance base URL (e.g. ``http://gitea.ai``).
-        token:    Gitea personal access token for the profile.
         interval: Seconds to sleep between polls.
         deps:     Shared runtime deps for filtering and agent runs.
     """
     headers = {
-        "Authorization": f"token {token}",
+        "Authorization": f"token {deps.gitea_token}",
         "Content-Type": "application/json",
     }
 
-    async with httpx.AsyncClient(base_url=base_url, headers=headers) as http:
+    async with httpx.AsyncClient(base_url=deps.gitea_base_url, headers=headers) as http:
         async with agent:  # starts the Gitea MCP subprocess
             while True:
                 await poll_once(agent, http, deps)

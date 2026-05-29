@@ -13,3 +13,5 @@ class AgentDeps:
 
     backend: LocalBackend
     gitea_username: str
+    gitea_base_url: str
+    gitea_token: str
