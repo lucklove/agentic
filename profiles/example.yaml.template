@@ -20,13 +20,11 @@ instructions: |
 capabilities:
   gitea:
     # allow:
-    #   - gitea_get_issue
-    #   - gitea_list_issue_comments
-    #   - gitea_create_issue_comment
+    #   - gitea_actions_config_write
     # deny:
-    #   - gitea_delete_issue_comment
+    #   - gitea_actions_config_write
   filesystem:
-    include_execute: false
+    include_execute: true
   skills:
     # allow:
     #   - example-skill
