@@ -31,6 +31,7 @@ from pydantic_ai_skills import SkillsCapability, discover_skills
 from capabilities.base import make_name_filter
 from capabilities.filesystem import AgentDeps, make_fs_capability
 from capabilities.gitea import make_gitea_capability
+from capabilities.memory import Memory
 from config import GlobalConfig, ProfileConfig
 
 __all__ = ["make_agent"]
@@ -73,6 +74,12 @@ def _build_registry(
             include_execute=opts.get("include_execute", False),
         ),
         "skills": lambda opts: _make_skills_capability(skills_dir, opts),
+        "memory": lambda opts: Memory.from_spec(
+            backend=opts.get("backend", "memory"),
+            path=opts.get("path", ".memories.json"),
+            inject_memories_in_instructions=opts.get("inject_memories_in_instructions", True),
+            max_instructions_memories=opts.get("max_instructions_memories", 20),
+        ),
     }
 
 

@@ -30,6 +30,11 @@ capabilities:
     #   - example-skill
     # deny:
     #   - noisy-skill
+  # memory:
+  #   backend: file        # "memory" (default, ephemeral) or "file" (on-disk JSON)
+  #   path: .memories.json # only used when backend: file
+  #   inject_memories_in_instructions: true
+  #   max_instructions_memories: 20
 
 polling:
   interval: 30
