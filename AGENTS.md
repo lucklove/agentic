@@ -38,6 +38,9 @@ Configurable capabilities (declared under `capabilities:` in a profile):
 | `gitea` | `GiteaMCPCapability` | `allow`, `deny` — MCP tool name filter |
 | `filesystem` | `_FSCapability` (ConsoleCapability) | `include_execute: bool` (default `false`) |
 | `skills` | `SkillsCapability` | `allow`, `deny` — skill name filter |
+| `memory` | `Memory` (vendored from pydantic-ai-harness) | `backend: memory\|file`, `path`, `inject_memories_in_instructions`, `max_instructions_memories` |
+
+`memory` stores live in `memories/` (gitignored). Use `backend: file` with `path: memories/<profile>.json` for persistence across restarts. The file is created automatically on first write — no pre-initialization needed.
 
 The `gitea` capability wraps `MCPServerStdio` as a pydantic-ai capability (not a bare `toolsets=` entry). `async with agent` cascades lifecycle management to the MCP subprocess through `GiteaMCPCapability.get_toolset()`.
 
@@ -67,7 +70,7 @@ The `name:` field (not the directory name) is what `allow`/`deny` matches agains
 
 ## Agent output
 
-The agent returns `str`. The string is recorded to logfire (`logfire.info("agent output", output=...)`). There is no structured output type — `agent_output.py` is a tombstone.
+The agent returns `str`. The string is recorded to logfire (`logfire.info("agent output", output=...)`). There is no structured output type.
 
 ## Instructions template
 
@@ -89,4 +92,5 @@ Add one entry to `_build_registry` in `agent_factory.py`:
 - [capabilities/base.py](capabilities/base.py) — `make_name_filter`, `CapabilityWithTools`
 - [capabilities/gitea.py](capabilities/gitea.py) — `GiteaMCPCapability`, `make_gitea_capability`
 - [capabilities/filesystem.py](capabilities/filesystem.py) — `make_fs_capability`, `AgentDeps`
+- [capabilities/memory.py](capabilities/memory.py) — `Memory`, `FileMemoryStore`, `DictMemoryStore` (vendored from pydantic-ai-harness PR, pre-merge)
 - [skills/example-skill/SKILL.md](skills/example-skill/SKILL.md) — skill authoring guide
