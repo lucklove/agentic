@@ -53,15 +53,16 @@ def build_model(model_spec: str) -> Model:
             f"invalid model spec {model_spec!r}; expected '<kind>:<name>'"
         )
 
-    http_client = _build_retrying_http_client()
-
     if kind == "openai-chat":
+        http_client = _build_retrying_http_client()
         return OpenAIChatModel(model_name, provider=OpenAIProvider(http_client=http_client))
     if kind == "openai-responses":
+        http_client = _build_retrying_http_client()
         return OpenAIResponsesModel(
             model_name, provider=OpenAIProvider(http_client=http_client)
         )
     if kind == "anthropic":
+        http_client = _build_retrying_http_client()
         return AnthropicModel(model_name, provider=AnthropicProvider(http_client=http_client))
 
     raise ValueError(f"unsupported model kind {kind!r} in model spec {model_spec!r}")

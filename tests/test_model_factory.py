@@ -41,3 +41,24 @@ def test_build_model_rejects_missing_prefix_separator() -> None:
 def test_build_model_rejects_unknown_prefix() -> None:
     with pytest.raises(ValueError, match="unsupported model kind"):
         build_model("openai:gpt-5.4")
+
+
+def test_build_model_does_not_create_http_client_for_unknown_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def fake_build_retrying_http_client() -> object:
+        nonlocal calls
+        calls += 1
+        return object()
+
+    monkeypatch.setattr(
+        "model_factory._build_retrying_http_client",
+        fake_build_retrying_http_client,
+    )
+
+    with pytest.raises(ValueError, match="unsupported model kind"):
+        build_model("openai:gpt-5.4")
+
+    assert calls == 0
