@@ -10,7 +10,8 @@ The factory receives the option dict from the profile YAML verbatim, so
 every capability can define its own option schema.
 
 Adding a new capability means adding one entry to the registry —
-no ``if`` chains needed anywhere.
+no ``if`` chains needed anywhere. ``code_exec`` is the registry name for
+``CodeMode`` and is enabled by default through ``agentic.yaml``.
 """
 
 from __future__ import annotations
@@ -95,7 +96,7 @@ def make_agent(
     """
     registry = _build_registry(global_cfg, profile)
 
-    # Profile capability entries replace same-named global entries entirely.
+    # Merge global defaults with profile overrides; profile entries win on name collision.
     effective_capabilities = global_cfg.capabilities | profile.capabilities
 
     capabilities: list[AbstractCapability[Any]] = [
