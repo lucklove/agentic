@@ -123,7 +123,9 @@ class NotificationContext:
         )
         resp.raise_for_status()
         reviews: list[dict[str, Any]] = resp.json()
-        return {user for user in (_login(review.get("user")) for review in reviews) if user}
+        return {
+            user for user in (_login(review.get("user")) for review in reviews) if user
+        }
 
     async def is_subject_relevant_to_agent(
         self,

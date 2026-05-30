@@ -5,8 +5,8 @@ Gitea-notification-driven agent runner. Each profile in `profiles/*.yaml` become
 ## Commands
 
 ```bash
+uv run main.py                                        # poll every profiles/*.yaml file
 uv run main.py <profile-name> [<profile-name> ...]  # poll one or more profiles concurrently
-uv run main.py --all                                # poll every profiles/*.yaml file
 uv run main.py <profile-name> -i "instruction"      # run once, print model output, do not poll
 uv run main.py --help                               # verify CLI shape after entrypoint edits
 uv run python -m py_compile main.py                 # focused syntax check
@@ -29,7 +29,7 @@ Notification threads are marked read in `poller._handle_notification` inside `fi
 
 `agentic.yaml` is global Gitea/MCP/skills config. `profiles/<name>.yaml` is per-agent config. Real `profiles/*.yaml` files are gitignored because they contain tokens; keep shared examples in `profiles/example.yaml.template`.
 
-`--all` scans only `profiles/*.yaml`, sorted by filename stem. It intentionally ignores `profiles/example.yaml.template`.
+With no profile arguments, `main.py` scans only `profiles/*.yaml`, sorted by filename stem. It intentionally ignores `profiles/example.yaml.template`.
 
 Profile instruction templating uses `string.Template.safe_substitute`; use `$gitea_username` for substitution. Brace form `{gitea_username}` is not substituted by current code.
 

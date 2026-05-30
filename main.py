@@ -13,12 +13,13 @@
 main.py — agentic entry point
 
 Usage:
+    uv run main.py
     uv run main.py <profile-name> [<profile-name> ...]
-    uv run main.py --all
     uv run main.py <profile-name> --instruction "..."
 
-Loads ``agentic.yaml`` (global config) and one or more profile files from
-``profiles/<profile-name>.yaml``. By default, each profile starts its own
+Loads ``agentic.yaml`` (global config) and profile files from
+``profiles/<profile-name>.yaml``. With no profile names, every
+``profiles/*.yaml`` file is loaded. By default, each profile starts its own
 notification polling loop. With ``--instruction``, a single profile runs once
 with that instruction and prints the model output.
 """
@@ -113,12 +114,7 @@ if __name__ == "__main__":
         "profiles",
         metavar="profile-name",
         nargs="*",
-        help="Profile name(s) to load from profiles/<name>.yaml",
-    )
-    parser.add_argument(
-        "--all",
-        action="store_true",
-        help="Load every .yaml profile from the profiles directory",
+        help="Profile name(s) to load; omitted means every profiles/*.yaml file",
     )
     parser.add_argument(
         "--instruction",
@@ -127,13 +123,10 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    if args.all and args.profiles:
-        parser.error("--all cannot be used with explicit profile names")
-
-    profile_names = _discover_profiles() if args.all else args.profiles
+    profile_names = args.profiles or _discover_profiles()
 
     if not profile_names:
-        parser.error("provide at least one profile or use --all")
+        parser.error("no profiles found in profiles/*.yaml")
 
     if args.instruction and len(profile_names) != 1:
         parser.error("--instruction requires exactly one profile")
