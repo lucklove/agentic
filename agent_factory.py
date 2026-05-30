@@ -33,6 +33,7 @@ from capabilities.base import make_name_filter
 from capabilities.filesystem import make_fs_capability
 from capabilities.gitea import make_gitea_capability
 from capabilities.memory import Memory
+from capabilities.privacy import PrivacyCapability
 from config import GlobalConfig, ProfileConfig
 from deps import AgentDeps
 
@@ -84,6 +85,7 @@ def _build_registry(
             ),
             max_instructions_memories=opts.get("max_instructions_memories", 20),
         ),
+        "privacy": lambda opts: PrivacyCapability.from_spec(opts),
     }
 
 
