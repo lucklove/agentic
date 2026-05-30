@@ -85,25 +85,14 @@ def _compile_flags(flags: str) -> int:
     return compiled
 
 
-def _peel_inline_flags(pattern: str, flags: str) -> tuple[str, str]:
-    while True:
-        if pattern.startswith("(?i)"):
-            pattern = pattern[4:]
-            flags += "" if "i" in flags else "i"
-            continue
-        if pattern.startswith("(?m)"):
-            pattern = pattern[4:]
-            flags += "" if "m" in flags else "m"
-            continue
-        break
-    return pattern, flags
-
-
 def _parse_ttl(value: Any) -> timedelta | None:
     if value is None:
         return timedelta(hours=1)
     if isinstance(value, int | float):
-        return timedelta(seconds=float(value))
+        seconds = float(value)
+        if seconds <= 0:
+            return None
+        return timedelta(seconds=seconds)
     text = str(value).strip().lower()
     if text in {"", "none", "off", "disabled"}:
         return None
@@ -112,6 +101,8 @@ def _parse_ttl(value: Any) -> timedelta | None:
         return timedelta(hours=1)
     amount = float(match.group(1))
     unit = match.group(2) or "s"
+    if amount <= 0:
+        return None
     if unit == "ms":
         return timedelta(milliseconds=amount)
     if unit == "m":
@@ -150,7 +141,6 @@ class _PatternSet:
             if not pattern:
                 continue
             flags = str(item.get("flags", ""))
-            pattern, flags = _peel_inline_flags(pattern, flags)
             regex_rules.append(
                 _RegexRule(
                     re.compile(pattern, _compile_flags(flags)),
@@ -311,13 +301,6 @@ class PrivacyCapability(AbstractCapability[Any]):
             return result
         return self.redact_object(result)
 
-    async def before_output_process(
-        self, ctx: RunContext[Any], *, output_context: Any, output: Any
-    ) -> Any:
-        if not self.enabled or not self.restore_final_output:
-            return output
-        return self.restore_object(output)
-
     async def after_output_validate(
         self, ctx: RunContext[Any], *, output_context: Any, output: Any
     ) -> Any:
@@ -354,6 +337,9 @@ class PrivacyCapability(AbstractCapability[Any]):
         if not matches:
             return value
 
+        # Prefer the earliest, longest match for overlapping spans. This is a
+        # deliberate simplification from VibeGuard's reference implementation,
+        # which can split longer matches around already-covered sub-matches.
         matches.sort(key=lambda m: (m.start, -(m.end - m.start)))
         selected: list[_Match] = []
         covered_until = -1

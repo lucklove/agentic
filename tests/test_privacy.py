@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 
 from pydantic_ai.messages import (
     ModelRequest,
@@ -155,3 +156,90 @@ def test_historical_tool_messages_are_redacted_before_request() -> None:
     result = redacted_ctx.messages[1].parts[0]
     assert "my-api-key-123" not in call.args["content"]
     assert "my-api-key-123" not in result.content
+
+
+def test_zero_ttl_disables_expiry() -> None:
+    cap = PrivacyCapability.from_spec(
+        {
+            "session": {"ttl": 0},
+            "patterns": {
+                "keywords": [{"value": "my-api-key-123", "category": "API_KEY"}],
+            },
+        }
+    )
+    placeholder = cap.redact_text("my-api-key-123")
+
+    cap.session.cleanup()
+
+    assert cap.restore_text(placeholder) == "my-api-key-123"
+
+
+def test_ttl_cleanup_expires_old_mappings() -> None:
+    cap = PrivacyCapability.from_spec(
+        {
+            "session": {"ttl": "1s"},
+            "patterns": {
+                "keywords": [{"value": "my-api-key-123", "category": "API_KEY"}],
+            },
+        }
+    )
+    placeholder = cap.redact_text("my-api-key-123")
+    cap.session.created[placeholder] = datetime.now(timezone.utc) - timedelta(seconds=2)
+
+    cap.session.cleanup()
+
+    assert cap.restore_text(placeholder) == placeholder
+
+
+def test_max_mappings_evicts_oldest_mapping() -> None:
+    cap = PrivacyCapability.from_spec(
+        {
+            "session": {"max_mappings": 1},
+            "patterns": {
+                "keywords": [
+                    {"value": "first-secret", "category": "SECRET"},
+                    {"value": "second-secret", "category": "SECRET"},
+                ],
+            },
+        }
+    )
+
+    first_placeholder = cap.redact_text("first-secret")
+    second_placeholder = cap.redact_text("second-secret")
+
+    assert cap.restore_text(first_placeholder) == first_placeholder
+    assert cap.restore_text(second_placeholder) == "second-secret"
+
+
+def test_overlapping_matches_use_earliest_longest_match() -> None:
+    cap = PrivacyCapability.from_spec(
+        {
+            "patterns": {
+                "keywords": [
+                    {"value": "secret-token", "category": "LONG"},
+                    {"value": "secret", "category": "SHORT"},
+                ],
+            },
+        }
+    )
+
+    redacted = cap.redact_text("use secret-token")
+
+    assert redacted.startswith("use __VG_LONG_")
+    assert "secret" not in redacted
+    assert cap.restore_text(redacted) == "use secret-token"
+
+
+def test_inline_regex_flags_are_compiled_by_re() -> None:
+    cap = PrivacyCapability.from_spec(
+        {
+            "patterns": {
+                "regex": [{"pattern": r"(?i)token-[a-z]+", "category": "TOKEN"}],
+            },
+        }
+    )
+
+    redacted = cap.redact_text("TOKEN-ABC")
+
+    assert redacted.startswith("__VG_TOKEN_")
+    assert cap.restore_text(redacted) == "TOKEN-ABC"
