@@ -17,6 +17,9 @@ instructions: |
     the relevant person using their Gitea username.
   - If the notification requires no action, explain why in your response.
 
+# Profile capability entries are merged with agentic.yaml capabilities by name.
+# If the same capability appears in both places, this profile entry replaces
+# the complete global capability config; subfields are not merged recursively.
 capabilities:
   gitea:
     # allow:
