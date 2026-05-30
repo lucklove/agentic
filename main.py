@@ -137,7 +137,10 @@ if __name__ == "__main__":
     if args.instruction and len(profile_names) != 1:
         parser.error("--instruction requires exactly one profile")
 
-    if args.instruction:
-        asyncio.run(run_instruction(profile_names[0], args.instruction))
-    else:
-        asyncio.run(run_profiles(profile_names))
+    try:
+        if args.instruction:
+            asyncio.run(run_instruction(profile_names[0], args.instruction))
+        else:
+            asyncio.run(run_profiles(profile_names))
+    except KeyboardInterrupt:
+        print("Interrupted.")
