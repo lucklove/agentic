@@ -2,6 +2,10 @@
 # Copy to profiles/example.yaml and fill in your token.
 # Start with: uv run main.py example
 
+# Supported model prefixes include:
+#   - openai-chat:<model>
+#   - openai-responses:<model>
+#   - anthropic:<model>
 model: "openai-responses:gpt-5.5"
 
 gitea:
