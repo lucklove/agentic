@@ -93,7 +93,13 @@ async def run_profiles(profile_names: list[str]) -> None:
     logfire.configure(send_to_logfire="if-token-present")
     logfire.instrument_pydantic_ai()
 
-    await asyncio.gather(*(_poll_profile(name) for name in profile_names))
+    results = await asyncio.gather(
+        *(_poll_profile(name) for name in profile_names),
+        return_exceptions=True,
+    )
+    for name, result in zip(profile_names, results, strict=True):
+        if isinstance(result, BaseException):
+            logfire.error("profile {name} exited with error", name=name, exc_info=result)
 
 
 async def run_instruction(profile_name: str, instruction: str) -> None:
