@@ -13,11 +13,14 @@
 main.py — agentic entry point
 
 Usage:
-    uv run main.py <profile-name>
+    uv run main.py <profile-name> [<profile-name> ...]
+    uv run main.py --all
+    uv run main.py <profile-name> --instruction "..."
 
-Loads ``agentic.yaml`` (global config) and ``profiles/<profile-name>.yaml``,
-resolves the Gitea username for the profile token, builds the agent, and
-starts the notification polling loop.
+Loads ``agentic.yaml`` (global config) and one or more profile files from
+``profiles/<profile-name>.yaml``. By default, each profile starts its own
+notification polling loop. With ``--instruction``, a single profile runs once
+with that instruction and prints the model output.
 """
 
 from __future__ import annotations
@@ -25,13 +28,15 @@ from __future__ import annotations
 import argparse
 import asyncio
 from pathlib import Path
+from typing import NamedTuple
 
 import httpx
 import logfire
+from pydantic_ai import Agent
 from pydantic_ai_backends import LocalBackend
 
 from agent_factory import make_agent
-from config import load_global_config, load_profile
+from config import ProfileConfig, load_global_config, load_profile
 from deps import AgentDeps
 from poller import poll_forever
 
@@ -49,10 +54,17 @@ async def _resolve_username(base_url: str, token: str) -> str:
         return resp.json()["login"]
 
 
-async def run(profile_name: str) -> None:
-    logfire.configure(send_to_logfire="if-token-present")
-    logfire.instrument_pydantic_ai()
+class AgentRuntime(NamedTuple):
+    profile: ProfileConfig
+    deps: AgentDeps
+    agent: Agent[AgentDeps, str]
 
+
+def _discover_profiles() -> list[str]:
+    return sorted(path.stem for path in (_HERE / "profiles").glob("*.yaml"))
+
+
+async def _build_runtime(profile_name: str) -> AgentRuntime:
     global_cfg = load_global_config(_HERE / "agentic.yaml")
     profile = load_profile(_HERE / "profiles" / f"{profile_name}.yaml")
     username = await _resolve_username(global_cfg.gitea.base_url, profile.gitea.token)
@@ -63,12 +75,34 @@ async def run(profile_name: str) -> None:
         gitea_token=profile.gitea.token,
     )
     agent = make_agent(profile, global_cfg, deps)
+    return AgentRuntime(profile=profile, deps=deps, agent=agent)
+
+
+async def _poll_profile(profile_name: str) -> None:
+    runtime = await _build_runtime(profile_name)
 
     await poll_forever(
-        agent,
-        interval=profile.polling.interval,
-        deps=deps,
+        runtime.agent,
+        interval=runtime.profile.polling.interval,
+        deps=runtime.deps,
     )
+
+
+async def run_profiles(profile_names: list[str]) -> None:
+    logfire.configure(send_to_logfire="if-token-present")
+    logfire.instrument_pydantic_ai()
+
+    await asyncio.gather(*(_poll_profile(name) for name in profile_names))
+
+
+async def run_instruction(profile_name: str, instruction: str) -> None:
+    logfire.configure(send_to_logfire="if-token-present")
+    logfire.instrument_pydantic_ai()
+
+    runtime = await _build_runtime(profile_name)
+    async with runtime.agent:
+        result = await runtime.agent.run(instruction, deps=runtime.deps)
+        print(result.output)
 
 
 if __name__ == "__main__":
@@ -76,10 +110,35 @@ if __name__ == "__main__":
         description="agentic — Gitea notification-driven agent runner"
     )
     parser.add_argument(
-        "profile",
+        "profiles",
         metavar="profile-name",
-        help="Name of the profile to load from profiles/<name>.yaml",
+        nargs="*",
+        help="Profile name(s) to load from profiles/<name>.yaml",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Load every .yaml profile from the profiles directory",
+    )
+    parser.add_argument(
+        "--instruction",
+        "-i",
+        help="Run one profile once with this instruction instead of polling",
     )
     args = parser.parse_args()
 
-    asyncio.run(run(args.profile))
+    if args.all and args.profiles:
+        parser.error("--all cannot be used with explicit profile names")
+
+    profile_names = _discover_profiles() if args.all else args.profiles
+
+    if not profile_names:
+        parser.error("provide at least one profile or use --all")
+
+    if args.instruction and len(profile_names) != 1:
+        parser.error("--instruction requires exactly one profile")
+
+    if args.instruction:
+        asyncio.run(run_instruction(profile_names[0], args.instruction))
+    else:
+        asyncio.run(run_profiles(profile_names))

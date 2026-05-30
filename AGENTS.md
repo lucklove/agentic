@@ -1,96 +1,53 @@
 # agentic
 
-Gitea-notification-driven agent factory. Each profile is an independent agent that polls Gitea for issue/PR comments and acts on them.
+Gitea-notification-driven agent runner. Each profile in `profiles/*.yaml` becomes an independent agent with its own token, model, instructions, capabilities, and polling interval.
 
-## Running
+## Commands
 
 ```bash
-uv run main.py <profile-name>   # loads profiles/<profile-name>.yaml
+uv run main.py <profile-name> [<profile-name> ...]  # poll one or more profiles concurrently
+uv run main.py --all                                # poll every profiles/*.yaml file
+uv run main.py <profile-name> -i "instruction"      # run once, print model output, do not poll
+uv run main.py --help                               # verify CLI shape after entrypoint edits
+uv run python -m py_compile main.py                 # focused syntax check
+make check                                          # flake8 via uvx
+make typecheck                                      # mypy with PEP 723 deps parsed from main.py
+make fmt                                            # autoflake, isort, black over local .py files
 ```
 
-No `pyproject.toml`. Dependencies are declared via [PEP 723](https://peps.python.org/pep-0723/) inline metadata in `main.py`. Python ≥ 3.14 required.
+There is no `pyproject.toml`; runtime dependencies and Python `>=3.14` live in the PEP 723 metadata block at the top of `main.py`. Add or remove runtime deps there, not in `Makefile`.
 
-## Config layers
+## Runtime Flow
 
-| File | Scope |
-|---|---|
-| `agentic.yaml` | Global: Gitea `base_url`, MCP `command`, `skills_dir` |
-| `profiles/<name>.yaml` | Per-agent: `model`, `gitea.token`, `instructions`, `capabilities`, `polling.interval` |
+`main.py` loads `agentic.yaml`, loads each requested profile, resolves the token's Gitea login with `GET /api/v1/user`, builds an agent, then either starts `poll_forever` or runs the direct `--instruction` path.
 
-See [profiles/example.yaml.template](profiles/example.yaml.template) for the full profile schema.
+Polling opens `async with agent` once per profile, which starts profile-scoped capability lifecycles such as the Gitea MCP subprocess. A poll reads unread notifications, keeps only `Issue` and `Pull`, skips closed/unrelated/dependency-blocked subjects, then calls `agent.run(...)`.
 
-## Execution flow
+Notification threads are marked read in `poller._handle_notification` inside `finally`, even if the agent errors. Poller errors are not retried internally; they propagate and can terminate the process.
 
-1. `main.py` — resolves Gitea username via `GET /api/v1/user` (one-time REST call), builds agent, enters `poll_forever`
-2. `poll_forever` — opens `async with agent` (starts MCP subprocess), loops `poll_once → sleep`
-3. `poll_once` — `GET /api/v1/notifications?all=false`, filters `subject.type ∈ {Issue, Pull}`
-4. Per notification — runs `agent.run(context_message)` inside a logfire span; **`PATCH /notifications/threads/{id}` (mark-read) always fires in `finally`**, even on agent error
-5. Errors propagate uncaught — process exits; no internal retry loop
+## Configuration
+
+`agentic.yaml` is global Gitea/MCP/skills config. `profiles/<name>.yaml` is per-agent config. Real `profiles/*.yaml` files are gitignored because they contain tokens; keep shared examples in `profiles/example.yaml.template`.
+
+`--all` scans only `profiles/*.yaml`, sorted by filename stem. It intentionally ignores `profiles/example.yaml.template`.
+
+Profile instruction templating uses `string.Template.safe_substitute`; use `$gitea_username` for substitution. Brace form `{gitea_username}` is not substituted by current code.
+
+The Gitea MCP command from `agentic.yaml` receives `GITEA_HOST`, `GITEA_ACCESS_TOKEN`, `GOPRIVATE`, `GONOSUMDB`, and `GOINSECURE` per profile in `capabilities/gitea.py`.
 
 ## Capabilities
 
-`CodeMode` (`code_exec`) is **always on** and not configurable in the profile. Do not add `code_exec:` to a profile's capabilities block — it has no effect.
+`CodeMode` is always prepended in `agent_factory.make_agent`; adding `code_exec:` to a profile has no effect.
 
-Configurable capabilities (declared under `capabilities:` in a profile):
+Configurable capability keys are `gitea`, `filesystem`, `skills`, and `memory`. Unknown capability keys are silently ignored by the registry comprehension in `agent_factory.py`.
 
-| Key | Class | Notable options |
-|---|---|---|
-| `gitea` | `GiteaMCPCapability` | `allow`, `deny` — MCP tool name filter |
-| `filesystem` | `_FSCapability` (ConsoleCapability) | `include_execute: bool` (default `false`) |
-| `skills` | `SkillsCapability` | `allow`, `deny` — skill name filter |
-| `memory` | `Memory` (vendored from pydantic-ai-harness) | `backend: memory\|file`, `path`, `inject_memories_in_instructions`, `max_instructions_memories` |
+`allow` and `deny` filtering is shared by Gitea MCP tools and skills through `capabilities/base.py`: allow wins first, then deny subtracts from it; deny-only exposes everything except denied names.
 
-`memory` stores live in `memories/` (gitignored). Use `backend: file` with `path: memories/<profile>.json` for persistence across restarts. The file is created automatically on first write — no pre-initialization needed.
+`filesystem.include_execute` defaults to `false`. Memory file stores should use paths under `memories/`, which is gitignored.
 
-The `gitea` capability wraps `MCPServerStdio` as a pydantic-ai capability (not a bare `toolsets=` entry). `async with agent` cascades lifecycle management to the MCP subprocess through `GiteaMCPCapability.get_toolset()`.
-
-## allow / deny filter semantics
-
-Used identically for both `capabilities.gitea` (MCP tool names) and `capabilities.skills` (skill names):
-
-- `allow` + `deny` → effective = `allow − deny`
-- `allow` only → `allow`
-- `deny` only → everything not in `deny`
-- neither → load/expose all
-
-Implemented in `make_name_filter` in [`capabilities/base.py`](capabilities/base.py).
-
-## Skills
-
-Each skill lives in `skills/<name>/SKILL.md` with YAML front-matter:
-
-```yaml
----
-name: my-skill-name
-description: One-line description.
----
-```
-
-The `name:` field (not the directory name) is what `allow`/`deny` matches against. See [skills/example-skill/SKILL.md](skills/example-skill/SKILL.md).
-
-## Agent output
-
-The agent returns `str`. The string is recorded to logfire (`logfire.info("agent output", output=...)`). There is no structured output type.
-
-## Instructions template
-
-`{gitea_username}` in a profile's `instructions:` string is substituted at startup with the login name resolved from the Gitea token. Use it to prevent the agent from reacting to its own comments.
-
-## Adding a capability
-
-Add one entry to `_build_registry` in `agent_factory.py`:
-
-```python
-"my-cap": lambda opts: MyCapability(opts.get("some_option", default)),
-```
-
-`_build_registry` receives both `global_cfg` and `profile` — close over either as needed.
+To add a capability, add one factory entry to `_build_registry` in `agent_factory.py`; avoid new condition chains elsewhere.
 
 ## Related Documentation
 
-- [profiles/example.yaml.template](profiles/example.yaml.template) — full profile schema with inline comments
-- [capabilities/base.py](capabilities/base.py) — `make_name_filter`, `CapabilityWithTools`
-- [capabilities/gitea.py](capabilities/gitea.py) — `GiteaMCPCapability`, `make_gitea_capability`
-- [capabilities/filesystem.py](capabilities/filesystem.py) — `make_fs_capability`, `AgentDeps`
-- [capabilities/memory.py](capabilities/memory.py) — `Memory`, `FileMemoryStore`, `DictMemoryStore` (vendored from pydantic-ai-harness PR, pre-merge)
-- [skills/example-skill/SKILL.md](skills/example-skill/SKILL.md) — skill authoring guide
+- [Profile schema template](profiles/example.yaml.template)
+- [Skill authoring example](skills/example-skill/SKILL.md)
