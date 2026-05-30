@@ -11,11 +11,6 @@ every capability can define its own option schema.
 
 Adding a new capability means adding one entry to the registry —
 no ``if`` chains needed anywhere.
-
-Always-on
----------
-``CodeMode`` is unconditionally prepended to the capability list and is
-not user-configurable.
 """
 
 from __future__ import annotations
@@ -59,13 +54,11 @@ def _build_registry(
     Defined as a function (not a module-level constant) so each call gets a
     fresh registry that safely closes over ``global_cfg`` and ``profile``
     without sharing state between profiles.
-
-    ``code_exec`` is intentionally absent — ``CodeMode`` is added
-    unconditionally in ``make_agent`` and is not user-configurable.
     """
     skills_dir = str(Path(global_cfg.skills_dir).resolve())
 
     return {
+        "code_exec": lambda opts: CodeMode(),
         "gitea": lambda opts: make_gitea_capability(
             base_url=global_cfg.gitea.base_url,
             mcp_command=global_cfg.gitea.mcp_command,
@@ -102,13 +95,12 @@ def make_agent(
     """
     registry = _build_registry(global_cfg, profile)
 
-    # CodeMode is always first — mandatory, not configurable per profile.
-    capabilities: list[AbstractCapability[Any]] = [CodeMode()]
+    # Profile capability entries replace same-named global entries entirely.
+    effective_capabilities = global_cfg.capabilities | profile.capabilities
 
-    # Append profile-declared capabilities in declaration order.
-    capabilities += [
+    capabilities: list[AbstractCapability[Any]] = [
         registry[name](opts)
-        for name, opts in profile.capabilities.items()
+        for name, opts in effective_capabilities.items()
         if name in registry
     ]
 

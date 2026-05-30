@@ -40,6 +40,13 @@ class GiteaGlobalConfig:
 class GlobalConfig:
     gitea: GiteaGlobalConfig
     skills_dir: str = "./skills"
+    # Keys are capability names; values are the option dicts from YAML.
+    capabilities: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+
+def _normalize_capabilities(raw_caps: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    """Normalize bare/null capability entries to empty option dicts."""
+    return {k: (v or {}) for k, v in (raw_caps or {}).items()}
 
 
 def load_global_config(path: str | Path = "agentic.yaml") -> GlobalConfig:
@@ -58,6 +65,7 @@ def load_global_config(path: str | Path = "agentic.yaml") -> GlobalConfig:
             ),
         ),
         skills_dir=data.get("skills_dir", "./skills"),
+        capabilities=_normalize_capabilities(data.get("capabilities")),
     )
 
 
@@ -93,9 +101,7 @@ def load_profile(path: str | Path) -> ProfileConfig:
     with open(path) as f:
         data: dict[str, Any] = yaml.safe_load(f)
 
-    # Normalise capability values: None (bare key with no sub-keys) → empty dict
-    raw_caps: dict[str, Any] = data.get("capabilities", {})
-    capabilities = {k: (v or {}) for k, v in raw_caps.items()}
+    capabilities = _normalize_capabilities(data.get("capabilities"))
 
     polling_data = data.get("polling", {})
 

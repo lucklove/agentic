@@ -13,3 +13,8 @@ gitea:
 # SkillsCapability will discover skills from here; each profile filters
 # by name via capabilities.skills.names.
 skills_dir: "./skills"
+
+# Capabilities enabled for all profiles by default. Profile entries with the
+# same capability name replace the complete global config for that capability.
+capabilities:
+  code_exec:
