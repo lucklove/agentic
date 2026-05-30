@@ -119,9 +119,16 @@ def test_final_output_restoration() -> None:
 
 
 def test_excluded_values_are_not_redacted() -> None:
-    cap = make_capability()
+    cap = PrivacyCapability.from_spec(
+        {
+            "patterns": {
+                "keywords": [{"value": "my-api-key-123", "category": "API_KEY"}],
+                "exclude": ["my-api-key-123"],
+            },
+        }
+    )
 
-    assert cap.redact_text("visit example.com") == "visit example.com"
+    assert cap.redact_text("use my-api-key-123") == "use my-api-key-123"
 
 
 def test_disabled_capability_does_not_redact() -> None:
