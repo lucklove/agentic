@@ -29,6 +29,8 @@ Notification threads are marked read in `poller._handle_notification` inside `fi
 
 `agentic.yaml` is global Gitea/MCP/skills config. `profiles/<name>.yaml` is per-agent config. Real `profiles/*.yaml` files are gitignored because they contain tokens; keep shared examples in `profiles/example.yaml.template`.
 
+Profile `model` values use explicit `<kind>:<name>` strings. Supported kinds are currently `openai-chat`, `openai-responses`, and `anthropic`.
+
 With no profile arguments, `main.py` scans only `profiles/*.yaml`, sorted by filename stem. The example template is excluded because `profiles/example.yaml.template` has the `.template` extension, not `.yaml`.
 
 Profile instruction templating uses `string.Template.safe_substitute`; use `$gitea_username` for substitution. Brace form `{gitea_username}` was documented previously but is not substituted by current code, so existing profiles using it should be updated.

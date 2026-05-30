@@ -32,6 +32,7 @@ from capabilities.memory import Memory
 from capabilities.privacy import PrivacyCapability
 from config import GlobalConfig, ProfileConfig
 from deps import AgentDeps
+from model_factory import build_model
 
 __all__ = ["make_agent"]
 
@@ -112,7 +113,7 @@ def make_agent(
     )
 
     return Agent(
-        profile.model,
+        build_model(profile.model),
         output_type=str,
         deps_type=AgentDeps,
         capabilities=capabilities,
