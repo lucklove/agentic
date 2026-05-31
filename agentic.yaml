@@ -18,3 +18,28 @@ skills_dir: "./skills"
 # same capability name replace the complete global config for that capability.
 capabilities:
   code_exec:
+  privacy:
+    enabled: true
+    placeholder_prefix: "__VG_"
+    session:
+      ttl: "1h"
+      max_mappings: 100000
+    patterns:
+      keywords: []
+      regex:
+        - pattern: "sk-[A-Za-z0-9]{48,}"
+          category: "OPENAI_KEY"
+        - pattern: "(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}"
+          category: "GITHUB_TOKEN"
+        - pattern: "AKIA[0-9A-Z]{16}"
+          category: "AWS_ACCESS_KEY"
+        - pattern: "(?i)aws.{0,20}['\"][0-9a-zA-Z/+]{40}['\"]"
+          category: "AWS_SECRET_KEY"
+        - pattern: "xox[baprs]-[0-9A-Za-z\\-]{10,}"
+          category: "SLACK_TOKEN"
+        - pattern: "eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+"
+          category: "JWT_TOKEN"
+        - pattern: "-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----[\\s\\S]+?-----END (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"
+          category: "SSH_PRIVATE_KEY"
+      builtin: ["email", "china_phone", "china_id", "uuid", "ipv4", "mac"]
+      exclude: ["example.com", "localhost", "127.0.0.1", "0.0.0.0"]
