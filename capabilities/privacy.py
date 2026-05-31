@@ -235,7 +235,6 @@ class PrivacyCapability(AbstractCapability[Any]):
 
     patterns: _PatternSet
     session: _PlaceholderSession = field(default_factory=_PlaceholderSession)
-    restore_tool_names: set[str] = field(default_factory=set)
     restore_final_output: bool = True
     enabled: bool = True
 
@@ -249,7 +248,6 @@ class PrivacyCapability(AbstractCapability[Any]):
                 ttl=_parse_ttl(session_spec.get("ttl", "1h")),
                 max_mappings=int(session_spec.get("max_mappings", 100000)),
             ),
-            restore_tool_names={str(name) for name in opts.get("restore_tools", [])},
             restore_final_output=bool(opts.get("restore_final_output", True)),
             enabled=bool(opts.get("enabled", True)),
         )
@@ -280,11 +278,6 @@ class PrivacyCapability(AbstractCapability[Any]):
         args: dict[str, Any],
     ) -> dict[str, Any]:
         if not self.enabled:
-            return args
-        tool_name = getattr(tool_def, "name", call.tool_name)
-        if self.restore_tool_names and tool_name not in self.restore_tool_names:
-            return args
-        if not self.restore_tool_names:
             return args
         return self.restore_object(args)
 

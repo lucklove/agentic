@@ -28,7 +28,6 @@ def make_capability() -> PrivacyCapability:
                 "builtin": ["email"],
                 "exclude": ["example.com"],
             },
-            "restore_tools": ["write_file"],
         }
     )
 
@@ -56,7 +55,7 @@ def test_request_redaction_redacts_messages_and_instructions() -> None:
     assert "__VG_EMAIL_" in redacted_request.instructions
 
 
-def test_before_tool_execute_restores_selected_tool_arguments() -> None:
+def test_before_tool_execute_restores_tool_arguments() -> None:
     cap = make_capability()
     placeholder = cap.redact_text("write my-api-key-123")
 
@@ -72,7 +71,7 @@ def test_before_tool_execute_restores_selected_tool_arguments() -> None:
     assert restored == {"content": "write my-api-key-123"}
 
 
-def test_before_tool_execute_does_not_restore_unconfigured_tools() -> None:
+def test_before_tool_execute_restores_unconfigured_tool_arguments() -> None:
     cap = make_capability()
     placeholder = cap.redact_text("write my-api-key-123")
 
@@ -85,7 +84,7 @@ def test_before_tool_execute_does_not_restore_unconfigured_tools() -> None:
         )
     )
 
-    assert restored == {"content": placeholder}
+    assert restored == {"content": "write my-api-key-123"}
 
 
 def test_after_tool_execute_redacts_results() -> None:
