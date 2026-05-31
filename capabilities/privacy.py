@@ -305,6 +305,13 @@ If you need to use one of these values in any tool/function, pass the placeholde
             return result
         return self.redact_object(result)
 
+    async def after_output_process(
+        self, ctx: RunContext[Any], *, output_context: Any, output: Any
+    ) -> Any:
+        if not self.enabled or not self.restore_final_output:
+            return output
+        return self.restore_object(output)
+
     async def after_output_validate(
         self, ctx: RunContext[Any], *, output_context: Any, output: Any
     ) -> Any:
