@@ -107,7 +107,7 @@ def test_after_tool_execute_redacts_results() -> None:
     assert "my-api-key-123" not in redacted["output"]
 
 
-def test_final_output_restoration() -> None:
+def test_final_output_restoration_after_output_process() -> None:
     cap = make_capability()
     placeholder = cap.redact_text("my-api-key-123")
 

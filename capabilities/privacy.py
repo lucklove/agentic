@@ -312,13 +312,6 @@ If you need to use one of these values in any tool/function, pass the placeholde
             return output
         return self.restore_object(output)
 
-    async def after_output_validate(
-        self, ctx: RunContext[Any], *, output_context: Any, output: Any
-    ) -> Any:
-        if not self.enabled or not self.restore_final_output:
-            return output
-        return self.restore_object(output)
-
     def redact_text(self, value: str) -> str:
         if not self.enabled or not value:
             return value
