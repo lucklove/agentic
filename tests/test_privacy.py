@@ -12,8 +12,8 @@ from pydantic_ai.messages import (
     ToolReturnPart,
     UserPromptPart,
 )
-from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models import ModelRequestContext
+from pydantic_ai.models.function import FunctionModel
 
 from capabilities.privacy import PrivacyCapability
 
@@ -123,18 +123,15 @@ def test_final_output_restoration_after_output_process() -> None:
 def test_plain_text_agent_output_restores_placeholders() -> None:
     cap = PrivacyCapability.from_spec({"patterns": {"builtin": ["ipv4"]}})
 
-    async def model_function(messages, info):
-        placeholder = cap.redact_text("192.0.2.1")
+    async def model_func(messages, info):
+        placeholder = cap.redact_text("1.2.3.4")
         return ModelResponse([TextPart(f"ip is {placeholder}")])
 
-    async def run_agent() -> str:
-        agent = Agent(
-            FunctionModel(model_function), output_type=str, capabilities=[cap]
-        )
-        result = await agent.run("what ip")
-        return result.output
+    agent = Agent(FunctionModel(model_func), output_type=str, capabilities=[cap])
 
-    assert asyncio.run(run_agent()) == "ip is 192.0.2.1"
+    result = asyncio.run(agent.run("what ip"))
+
+    assert result.output == "ip is 1.2.3.4"
 
 
 def test_excluded_values_are_not_redacted() -> None:
