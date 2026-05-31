@@ -11,6 +11,7 @@ uv run main.py <profile-name> -i "instruction"      # run once, print model outp
 uv run main.py --help                               # verify CLI shape after entrypoint edits
 uv run python -m py_compile main.py                 # focused syntax check
 make check                                          # flake8 via uvx
+make test                                           # pytest with PEP 723 deps parsed from main.py
 make typecheck                                      # mypy with PEP 723 deps parsed from main.py
 make fmt                                            # autoflake, isort, black over local .py files
 ```

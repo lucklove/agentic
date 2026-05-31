@@ -252,6 +252,17 @@ class PrivacyCapability(AbstractCapability[Any]):
             enabled=bool(opts.get("enabled", True)),
         )
 
+    def get_instructions(self) -> str | None:
+        if not self.enabled:
+            return None
+        return f"""\
+## Privacy placeholders
+
+The current safety mechanism redacts sensitive values used in tools/functions, such as secrets and tokens, into placeholder strings that start with `{self.session.prefix}`.
+
+If you need to use one of these values in any tool/function, pass the placeholder string exactly as-is. The tool/function will automatically receive the original, unredacted value.
+"""
+
     async def before_model_request(
         self,
         ctx: RunContext[Any],

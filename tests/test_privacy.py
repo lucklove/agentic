@@ -143,6 +143,24 @@ def test_disabled_capability_does_not_redact() -> None:
     assert cap.redact_text("keep my-api-key-123") == "keep my-api-key-123"
 
 
+def test_enabled_capability_injects_privacy_placeholder_instructions() -> None:
+    cap = PrivacyCapability.from_spec({"placeholder_prefix": "__SAFE_"})
+
+    instructions = cap.get_instructions()
+
+    assert instructions is not None
+    assert "Privacy placeholders" in instructions
+    assert "`__SAFE_`" in instructions
+    assert "pass the placeholder string exactly as-is" in instructions
+    assert "original, unredacted value" in instructions
+
+
+def test_disabled_capability_does_not_inject_instructions() -> None:
+    cap = PrivacyCapability.from_spec({"enabled": False})
+
+    assert cap.get_instructions() is None
+
+
 def test_historical_tool_messages_are_redacted_before_request() -> None:
     cap = make_capability()
     response = ModelResponse(

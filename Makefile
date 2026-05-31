@@ -12,6 +12,8 @@ fmt:
 check:
 	find . -name "*.py" -not -path "./.venv/*" -exec uvx flake8 --ignore "E203,W291,E501,W503,E402" {} \;
 
+test:
+	uv run $(DEPS_FLAGS) --with pytest -m pytest tests
+
 typecheck:
 	uv run $(DEPS_FLAGS) --with mypy -m mypy main.py --disable-error-code=import-untyped
-
