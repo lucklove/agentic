@@ -3,14 +3,17 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 
+from pydantic_ai import Agent
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
+    TextPart,
     ToolCallPart,
     ToolReturnPart,
     UserPromptPart,
 )
 from pydantic_ai.models import ModelRequestContext
+from pydantic_ai.models.function import FunctionModel
 
 from capabilities.privacy import PrivacyCapability
 
@@ -109,12 +112,26 @@ def test_final_output_restoration() -> None:
     placeholder = cap.redact_text("my-api-key-123")
 
     restored = asyncio.run(
-        cap.after_output_validate(
+        cap.after_output_process(
             None, output_context=object(), output=f"Done: {placeholder}"
         )
     )
 
     assert restored == "Done: my-api-key-123"
+
+
+def test_plain_text_agent_output_restores_placeholders() -> None:
+    cap = PrivacyCapability.from_spec({"patterns": {"builtin": ["ipv4"]}})
+
+    async def model_func(messages, info):
+        placeholder = cap.redact_text("1.2.3.4")
+        return ModelResponse([TextPart(f"ip is {placeholder}")])
+
+    agent = Agent(FunctionModel(model_func), output_type=str, capabilities=[cap])
+
+    result = asyncio.run(agent.run("what ip"))
+
+    assert result.output == "ip is 1.2.3.4"
 
 
 def test_excluded_values_are_not_redacted() -> None:
