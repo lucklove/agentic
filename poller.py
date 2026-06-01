@@ -28,8 +28,12 @@ from deps import AgentDeps
 # Gitea notification subject types we care about.
 _SUBJECT_TYPES = frozenset({"Issue", "Pull"})
 
-# Allow longer autonomous notification-handling loops before pydantic-ai stops.
-_AGENT_RUN_USAGE_LIMITS = UsageLimits(request_limit=100)
+# Default for longer autonomous notification-handling loops before pydantic-ai stops.
+DEFAULT_AGENT_REQUEST_LIMIT = 100
+
+
+def _agent_run_usage_limits(request_limit: int) -> UsageLimits:
+    return UsageLimits(request_limit=request_limit)
 
 
 def _parse_number(url: str) -> str:
@@ -173,6 +177,7 @@ async def _handle_notification(
     http: httpx.AsyncClient,
     notif: dict[str, Any],
     deps: AgentDeps,
+    request_limit: int = DEFAULT_AGENT_REQUEST_LIMIT,
 ) -> None:
     """Run the agent for one notification, then mark it as read on success."""
     notif_ctx = NotificationContext(http=http, notif=notif)
@@ -211,7 +216,7 @@ async def _handle_notification(
             result = await agent.run(
                 _build_context_message(notif),
                 deps=deps,
-                usage_limits=_AGENT_RUN_USAGE_LIMITS,
+                usage_limits=_agent_run_usage_limits(request_limit),
             )
             logfire.info("agent output", output=result.output)
 
@@ -222,6 +227,7 @@ async def poll_once(
     agent: Agent[AgentDeps, str],
     http: httpx.AsyncClient,
     deps: AgentDeps,
+    request_limit: int = DEFAULT_AGENT_REQUEST_LIMIT,
 ) -> None:
     """Fetch unread notifications and dispatch one agent run per match."""
     resp = await http.get("/api/v1/notifications", params={"all": "false"})
@@ -231,13 +237,14 @@ async def poll_once(
     relevant = (n for n in notifications if n["subject"]["type"] in _SUBJECT_TYPES)
 
     for notif in relevant:
-        await _handle_notification(agent, http, notif, deps)
+        await _handle_notification(agent, http, notif, deps, request_limit=request_limit)
 
 
 async def poll_forever(
     agent: Agent[AgentDeps, str],
     interval: int,
     deps: AgentDeps,
+    request_limit: int = DEFAULT_AGENT_REQUEST_LIMIT,
 ) -> None:
     """Main polling loop.  Runs until cancelled or an unhandled error occurs.
 
@@ -246,8 +253,9 @@ async def poll_forever(
 
     Args:
         agent:    The configured pydantic-ai Agent.
-        interval: Seconds to sleep between polls.
-        deps:     Shared runtime deps for filtering and agent runs.
+        interval:      Seconds to sleep between polls.
+        deps:          Shared runtime deps for filtering and agent runs.
+        request_limit: Maximum pydantic-ai model requests per agent run.
     """
     headers = {
         "Authorization": f"token {deps.gitea_token}",
@@ -257,5 +265,5 @@ async def poll_forever(
     async with httpx.AsyncClient(base_url=deps.gitea_base_url, headers=headers) as http:
         async with agent:  # starts the Gitea MCP subprocess
             while True:
-                await poll_once(agent, http, deps)
+                await poll_once(agent, http, deps, request_limit=request_limit)
                 await asyncio.sleep(interval)

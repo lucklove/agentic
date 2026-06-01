@@ -109,9 +109,9 @@ def test_handle_notification_marks_thread_read_after_success(
         http = FakeHTTP()
         agent = PassingAgent()
 
-        await _handle_notification(agent, http, notification(), deps)
+        await _handle_notification(agent, http, notification(), deps, request_limit=42)
 
-        assert getattr(agent.usage_limits, "request_limit") == 100
+        assert getattr(agent.usage_limits, "request_limit") == 42
         assert http.patches == ["/api/v1/notifications/threads/123"]
 
     asyncio.run(run())

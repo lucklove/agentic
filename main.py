@@ -59,6 +59,7 @@ class AgentRuntime(NamedTuple):
     profile: ProfileConfig
     deps: AgentDeps
     agent: Agent[AgentDeps, str]
+    request_limit: int
 
 
 def _resolve_path(path: str) -> Path:
@@ -84,7 +85,12 @@ async def _build_runtime(profile_name: str) -> AgentRuntime:
         gitea_token=profile.gitea.token,
     )
     agent = make_agent(profile, global_cfg, deps)
-    return AgentRuntime(profile=profile, deps=deps, agent=agent)
+    return AgentRuntime(
+        profile=profile,
+        deps=deps,
+        agent=agent,
+        request_limit=global_cfg.agent_request_limit,
+    )
 
 
 async def _poll_profile(profile_name: str) -> None:
@@ -94,6 +100,7 @@ async def _poll_profile(profile_name: str) -> None:
         runtime.agent,
         interval=runtime.profile.polling.interval,
         deps=runtime.deps,
+        request_limit=runtime.request_limit,
     )
 
 
