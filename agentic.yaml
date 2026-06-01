@@ -23,6 +23,10 @@ skills_dir: "./skills"
 capabilities:
   code_exec:
   gitea:
+  openai_compaction:
+    token_threshold: 150000
+  anthropic_compaction:
+    token_threshold: 150000
   privacy:
     enabled: true
     placeholder_prefix: "__VG_"
