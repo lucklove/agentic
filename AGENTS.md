@@ -30,6 +30,8 @@ Notification threads are marked read in `poller._handle_notification` only after
 
 `agentic.yaml` is global Gitea/MCP/skills config. `profiles/<name>.yaml` is per-agent config. Real `profiles/*.yaml` files are gitignored because they contain tokens; keep shared examples in `profiles/example.yaml.template`.
 
+`working_dir` controls the `LocalBackend` cwd used by command/code execution. It defaults to `.` in `agentic.yaml` (the `main.py` directory), and can be overridden per profile with `working_dir` in `profiles/<name>.yaml`. Relative paths are resolved from the `main.py` directory.
+
 Profile `model` values use explicit `<kind>:<name>` strings. Supported kinds are currently `openai-chat`, `openai-responses`, and `anthropic`.
 
 With no profile arguments, `main.py` scans only `profiles/*.yaml`, sorted by filename stem. The example template is excluded because `profiles/example.yaml.template` has the `.template` extension, not `.yaml`.

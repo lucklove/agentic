@@ -9,6 +9,10 @@ gitea:
     # automatically per-profile at runtime.
     command: ["go", "run", "gitea.ai/autonomous/gitea-mcp@main", "-t", "stdio"]
 
+# Default working directory for tool/command execution. Relative paths are
+# resolved from this file's directory. Profiles can override this value.
+working_dir: "."
+
 # Directory that contains all available skills (subdirs with SKILL.md).
 # SkillsCapability will discover skills from here; each profile filters
 # by name via capabilities.skills.names.
