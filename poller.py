@@ -110,13 +110,6 @@ class NotificationContext:
         resp.raise_for_status()
         return resp.json()
 
-    async def get_blocks(self) -> list[dict[str, Any]]:
-        resp = await self.http.get(
-            f"/api/v1/repos/{self.owner}/{self.repo}/issues/{self.number}/blocks"
-        )
-        resp.raise_for_status()
-        return resp.json()
-
     async def collect_pr_reviewers(self) -> set[str]:
         resp = await self.http.get(
             f"/api/v1/repos/{self.owner}/{self.repo}/pulls/{self.number}/reviews"
@@ -142,30 +135,6 @@ class NotificationContext:
     async def open_dependencies(self) -> list[dict[str, Any]]:
         dependencies = await self.get_dependencies()
         return [dep for dep in dependencies if not _is_closed(dep)]
-
-    async def comment_on_open_blocks(self, closed_subject: dict[str, Any]) -> None:
-        closed_url = closed_subject.get("html_url")
-        body = (
-            f"A dependency has been closed: {closed_url}"
-            if closed_url
-            else "A dependency has been closed."
-        )
-
-        for block in await self.get_blocks():
-            if _is_closed(block):
-                continue
-
-            repo_full_name = (block.get("repository") or {}).get("full_name")
-            if not repo_full_name:
-                continue
-
-            owner, repo = _parse_repo(repo_full_name)
-            number = block["number"]
-            resp = await self.http.post(
-                f"/api/v1/repos/{owner}/{repo}/issues/{number}/comments",
-                json={"body": body},
-            )
-            resp.raise_for_status()
 
 
 def _build_context_message(notif: dict[str, Any]) -> str:
@@ -249,10 +218,6 @@ async def _handle_notification(
             deps=deps,
         )
         logfire.info("agent output", output=result.output)
-
-        subject = await notif_ctx.get_subject()
-        if _is_closed(subject):
-            await notif_ctx.comment_on_open_blocks(subject)
 
         await _mark_notification_read(http, notif_ctx)
 
