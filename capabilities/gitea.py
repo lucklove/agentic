@@ -25,6 +25,7 @@ provides.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any, Callable
 
 from pydantic_ai.capabilities import AbstractCapability
@@ -49,6 +50,12 @@ A missing function means the current agent profile intentionally does not grant 
 that permission.
 """
 
+_GITEA_PULL_REQUEST_READ_INSTRUCTIONS = """\
+When using `gitea_pull_request_read` with method="get_review_comments", pass \
+`review_id`. To read all PR review comments, first call method="get_reviews", \
+then call method="get_review_comments" once per review id.
+"""
+
 
 @dataclass
 class GiteaMCPCapability(AbstractCapability[Any]):
@@ -64,7 +71,11 @@ class GiteaMCPCapability(AbstractCapability[Any]):
     _filter: Callable[[Any], bool] | None  # None → expose all tools
 
     def get_instructions(self) -> str:
-        return _GITEA_INSTRUCTIONS
+        instructions = _GITEA_INSTRUCTIONS
+        tool = SimpleNamespace(name="gitea_pull_request_read")
+        if self._filter is None or self._filter(tool):
+            instructions += "\n\n" + _GITEA_PULL_REQUEST_READ_INSTRUCTIONS
+        return instructions
 
     def get_toolset(self) -> AgentToolset[Any]:
         if self._filter is None:
