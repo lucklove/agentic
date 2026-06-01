@@ -53,4 +53,4 @@ To add a capability, add one factory entry to `_build_registry` in `agent_factor
 ## Related Documentation
 
 - [Profile schema template](profiles/example.yaml.template)
-- [Skill authoring example](skills/example-skill/SKILL.md)
+- [Skill authoring guide](skills/create-skill/SKILL.md)
