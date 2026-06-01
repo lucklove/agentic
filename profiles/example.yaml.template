@@ -11,6 +11,10 @@ model: "openai-responses:gpt-5.5"
 gitea:
   token: "YOUR_GITEA_TOKEN"
 
+# Optional working directory override for tool/command execution. Relative paths
+# are resolved from the main.py directory. Defaults to agentic.yaml working_dir.
+# working_dir: "."
+
 instructions: |
   You are a helpful agent on Gitea. Your username is {gitea_username}.
 

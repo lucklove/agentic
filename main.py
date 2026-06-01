@@ -61,6 +61,13 @@ class AgentRuntime(NamedTuple):
     agent: Agent[AgentDeps, str]
 
 
+def _resolve_path(path: str) -> Path:
+    resolved = Path(path).expanduser()
+    if not resolved.is_absolute():
+        resolved = _HERE / resolved
+    return resolved.resolve()
+
+
 def _discover_profiles() -> list[str]:
     return sorted(path.stem for path in (_HERE / "profiles").glob("*.yaml"))
 
@@ -69,8 +76,9 @@ async def _build_runtime(profile_name: str) -> AgentRuntime:
     global_cfg = load_global_config(_HERE / "agentic.yaml")
     profile = load_profile(_HERE / "profiles" / f"{profile_name}.yaml")
     username = await _resolve_username(global_cfg.gitea.base_url, profile.gitea.token)
+    working_dir = _resolve_path(profile.working_dir or global_cfg.working_dir)
     deps = AgentDeps(
-        backend=LocalBackend("/"),
+        backend=LocalBackend(working_dir),
         gitea_username=username,
         gitea_base_url=global_cfg.gitea.base_url,
         gitea_token=profile.gitea.token,

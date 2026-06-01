@@ -39,6 +39,7 @@ class GiteaGlobalConfig:
 @dataclass
 class GlobalConfig:
     gitea: GiteaGlobalConfig
+    working_dir: str = "."
     skills_dir: str = "./skills"
     # Keys are capability names; values are the option dicts from YAML.
     capabilities: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -64,6 +65,7 @@ def load_global_config(path: str | Path = "agentic.yaml") -> GlobalConfig:
                 ["go", "run", "gitea.com/gitea/gitea-mcp@latest", "-t", "stdio"],
             ),
         ),
+        working_dir=data.get("working_dir", "."),
         skills_dir=data.get("skills_dir", "./skills"),
         capabilities=_normalize_capabilities(data.get("capabilities")),
     )
@@ -91,6 +93,7 @@ class ProfileConfig:
     model: str
     gitea: GiteaProfileConfig
     instructions: str
+    working_dir: str | None = None
     # Keys are capability names; values are the option dicts from YAML.
     # e.g. {"filesystem": {"include_execute": false}, "code_exec": {}, "skills": {"names": [...]}}
     capabilities: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -109,6 +112,7 @@ def load_profile(path: str | Path) -> ProfileConfig:
         model=data["model"],
         gitea=GiteaProfileConfig(token=data["gitea"]["token"]),
         instructions=data["instructions"],
+        working_dir=data.get("working_dir"),
         capabilities=capabilities,
         polling=PollingConfig(
             interval=int(polling_data.get("interval", 30)),
