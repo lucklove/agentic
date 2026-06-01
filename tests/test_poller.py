@@ -45,6 +45,7 @@ class FakeHTTP:
 class PassingAgent:
     def __init__(self) -> None:
         self.usage_limits: object | None = None
+        self.run_deps: AgentDeps | None = None
 
     async def run(
         self,
@@ -53,6 +54,7 @@ class PassingAgent:
         usage_limits: object | None = None,
     ) -> SimpleNamespace:
         self.usage_limits = usage_limits
+        self.run_deps = deps
         return SimpleNamespace(output="done")
 
 
@@ -88,15 +90,13 @@ def notification() -> dict[str, object]:
     }
 
 
-def test_build_context_message_includes_shared_rules() -> None:
+def test_build_context_message_excludes_shared_rules() -> None:
     message = _build_context_message(notification())
 
-    assert "Shared notification-handling rules" in message
-    assert "if someone @mentions you" in message
-    assert "Do not react to your own comments" in message
-    assert "Read the project's AGENTS.md" in message
-    assert "Read the full relevant thread and supporting context before acting" in message
-    assert "If no action is required, explain why" in message
+    assert "Shared notification-handling rules" not in message
+    assert "if someone @mentions you" not in message
+    assert "Do not react to your own comments" not in message
+    assert "Read the project's AGENTS.md" not in message
 
 
 def test_handle_notification_leaves_thread_unread_when_agent_fails(
@@ -123,6 +123,13 @@ def test_handle_notification_marks_thread_read_after_success(
         await _handle_notification(agent, http, notification(), deps, request_limit=42)
 
         assert getattr(agent.usage_limits, "request_limit") == 42
+        assert agent.run_deps is not None
+        assert agent.run_deps.notification_subject is not None
+        assert agent.run_deps.notification_subject.owner == "autonomous"
+        assert agent.run_deps.notification_subject.repo == "agentic"
+        assert agent.run_deps.notification_subject.number == "31"
+        assert agent.run_deps.notification_subject.subject_type == "Issue"
+        assert deps.notification_subject is None
         assert http.patches == ["/api/v1/notifications/threads/123"]
 
     asyncio.run(run())

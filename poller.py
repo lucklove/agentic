@@ -15,7 +15,7 @@ Errors are not caught here; they propagate to the caller and exit the process.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from string import Template
 from typing import Any
 
@@ -24,7 +24,7 @@ import logfire
 from pydantic_ai import Agent
 from pydantic_ai.usage import UsageLimits
 
-from deps import AgentDeps
+from deps import AgentDeps, NotificationSubject
 
 # Gitea notification subject types we care about.
 _SUBJECT_TYPES = frozenset({"Issue", "Pull"})
@@ -42,14 +42,7 @@ Repository: $repo
 Type: $type_label #$number
 Title: $title
 
-Use your available tools to read the full context of $type_label #$number in $repo before deciding what action to take, then take the required action now when your available tools allow it.
-
-Shared notification-handling rules:
-- Highest priority: if someone @mentions you in the issue or pull request, reply with an @mention back to that person unless the task is completed during this turn; if it is completed, finish by applying the appropriate final state change for the issue or PR instead of posting a separate follow-up reply.
-- Do not react to your own comments. Exception: replying to someone else with an @mention inside an issue or PR you created does not count as reacting to your own comment.
-- Read the project's AGENTS.md.
-- Read the full relevant thread and supporting context before acting.
-- If no action is required, explain why."""
+Use your available tools to read the full context of $type_label #$number in $repo before deciding what action to take, then take the required action now when your available tools allow it."""
 )
 
 
@@ -247,9 +240,18 @@ async def _handle_notification(
                 open_dependencies=len(open_dependencies),
             )
         else:
+            run_deps = replace(
+                deps,
+                notification_subject=NotificationSubject(
+                    owner=notif_ctx.owner,
+                    repo=notif_ctx.repo,
+                    number=notif_ctx.number,
+                    subject_type=notif_ctx.subject_type,
+                ),
+            )
             result = await agent.run(
                 _build_context_message(notif),
-                deps=deps,
+                deps=run_deps,
                 usage_limits=_agent_run_usage_limits(request_limit),
             )
             logfire.info("agent output", output=result.output)
