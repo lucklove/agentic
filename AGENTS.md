@@ -44,7 +44,7 @@ The Gitea MCP command from `agentic.yaml` receives `GITEA_HOST`, `GITEA_ACCESS_T
 
 `agentic.yaml` can define global capabilities that are enabled for all profiles; by default it enables `code_exec`, which maps to `CodeMode`. Profile capability entries are merged by name and replace same-named global entries completely; capability options are not recursively merged.
 
-Configurable capability keys are `code_exec`, `gitea`, `filesystem`, `skills`, and `memory`. Unknown capability keys are silently ignored by the registry comprehension in `agent_factory.py`.
+Configurable capability keys are `code_exec`, `gitea`, `filesystem`, `skills`, `memory`, `privacy`, `openai_compaction`, and `anthropic_compaction`. Unknown capability keys are silently ignored by the registry comprehension in `agent_factory.py`.
 
 `allow` and `deny` filtering is shared by Gitea MCP tools and skills through `capabilities/base.py`: allow wins first, then deny subtracts from it; deny-only exposes everything except denied names.
 

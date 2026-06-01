@@ -46,6 +46,11 @@ capabilities:
   #   path: .memories.json # only used when backend: file
   #   inject_memories_in_instructions: true
   #   max_instructions_memories: 20
+  # openai_compaction:
+  #   token_threshold: 100000          # stateful OpenAI Responses compaction
+  #   # message_count_threshold: 20    # stateless compaction for ZDR/control
+  # anthropic_compaction:
+  #   token_threshold: 100000
 
 polling:
   interval: 30

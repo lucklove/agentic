@@ -22,6 +22,8 @@ from typing import Any, Callable
 
 from pydantic_ai import Agent, AgentRetries
 from pydantic_ai.capabilities import AbstractCapability
+from pydantic_ai.models.anthropic import AnthropicCompaction
+from pydantic_ai.models.openai import OpenAICompaction
 from pydantic_ai_harness import CodeMode
 from pydantic_ai_skills import SkillsCapability, discover_skills
 
@@ -81,6 +83,8 @@ def _build_registry(
             max_instructions_memories=opts.get("max_instructions_memories", 20),
         ),
         "privacy": lambda opts: PrivacyCapability.from_spec(opts),
+        "openai_compaction": lambda opts: OpenAICompaction(**opts),
+        "anthropic_compaction": lambda opts: AnthropicCompaction(**opts),
     }
 
 
