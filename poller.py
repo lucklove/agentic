@@ -186,10 +186,7 @@ async def _handle_notification(
                 repo=notif_ctx.repo_full_name,
                 number=notif_ctx.number,
             )
-            await _mark_notification_read(http, notif_ctx)
-            return
-
-        if not await notif_ctx.is_subject_relevant_to_agent(
+        elif not await notif_ctx.is_subject_relevant_to_agent(
             subject,
             deps.gitea_username,
         ):
@@ -199,25 +196,19 @@ async def _handle_notification(
                 number=notif_ctx.number,
                 gitea_username=deps.gitea_username,
             )
-            await _mark_notification_read(http, notif_ctx)
-            return
-
-        open_dependencies = await notif_ctx.open_dependencies()
-        if open_dependencies:
+        elif open_dependencies := await notif_ctx.open_dependencies():
             logfire.info(
                 "skip notification with open dependencies",
                 repo=notif_ctx.repo_full_name,
                 number=notif_ctx.number,
                 open_dependencies=len(open_dependencies),
             )
-            await _mark_notification_read(http, notif_ctx)
-            return
-
-        result = await agent.run(
-            _build_context_message(notif),
-            deps=deps,
-        )
-        logfire.info("agent output", output=result.output)
+        else:
+            result = await agent.run(
+                _build_context_message(notif),
+                deps=deps,
+            )
+            logfire.info("agent output", output=result.output)
 
         await _mark_notification_read(http, notif_ctx)
 
