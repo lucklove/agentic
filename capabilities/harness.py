@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+from pydantic_ai import ModelRetry
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.tools import RunContext
 
@@ -56,7 +57,7 @@ class HarnessCapability(AbstractCapability[AgentDeps]):
         if mention not in last_comment.get("body", ""):
             return output
 
-        raise RuntimeError(
+        raise ModelRetry(
             f"The last comment on {subject.owner}/{subject.repo} "
             f"{subject.subject_type.lower()} #{subject.number} mentions {mention}; "
             "the agent must respond in the thread before producing final output."

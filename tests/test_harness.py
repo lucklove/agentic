@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from pydantic_ai import ModelRetry
 
 from capabilities.harness import HarnessCapability
 from deps import AgentDeps, NotificationSubject
@@ -94,7 +95,7 @@ def test_before_output_process_raises_when_last_comment_mentions_agent(
         "_get_last_comment",
         AsyncMock(return_value={"body": "Please check this @code_agent"}),
     ):
-        with pytest.raises(RuntimeError, match="mentions @code_agent"):
+        with pytest.raises(ModelRetry, match="mentions @code_agent"):
             asyncio.run(
                 cap.before_output_process(ctx, output_context=object(), output="done")
             )
