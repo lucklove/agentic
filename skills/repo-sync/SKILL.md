@@ -7,10 +7,9 @@ description: Bidirectional sync between GitHub and Gitea repositories using forc
 
 # Repo Sync
 
-Use this skill to synchronize changes between the GitHub repository
-`tidbcloud/auto-deploy` and the Gitea repository `gitea.ai/autonomous/auto-deploy`.
-Both repositories use squash merge, so sync detection is based on matching the
-core commit title on each side.
+Use this skill to synchronize changes between any GitHub repository and its
+corresponding Gitea mirror. Both repositories should use squash merge, because
+sync detection is based on matching the core commit title on each side.
 
 ## GitHub to Gitea
 
@@ -29,7 +28,7 @@ Arguments:
 Example:
 
 ```shell
-skills/repo-sync/scripts/sync_github_to_gitea.py   --repo-dir /path/to/auto-deploy   --github-url https://<token>@github.com/tidbcloud/auto-deploy.git   --gitea-url https://<token>@gitea.ai/autonomous/auto-deploy.git
+skills/repo-sync/scripts/sync_github_to_gitea.py   --repo-dir /path/to/repo   --github-url https://<token>@github.com/owner/repo.git   --gitea-url https://<token>@gitea.example.com/org/repo.git
 ```
 
 ## Gitea to GitHub
@@ -44,6 +43,8 @@ Arguments:
 - `--repo-dir`: local clone path; it must already exist and be a Git repository.
 - `--gitea-url`: Gitea repository URL with token auth.
 - `--github-url`: GitHub repository URL with token auth.
+- `--github-repo`: optional GitHub `owner/repo` name for `gh pr` commands; if
+  omitted, it is derived from `--github-url`.
 - `--main-branch`: main branch name; defaults to `main`.
 - `--dry-run`: skip pushes and `gh pr create`, and print the actions that would
   be performed.
@@ -51,7 +52,7 @@ Arguments:
 Example:
 
 ```shell
-skills/repo-sync/scripts/sync_gitea_to_github.py   --repo-dir /path/to/auto-deploy   --gitea-url https://<token>@gitea.ai/autonomous/auto-deploy.git   --github-url https://<token>@github.com/tidbcloud/auto-deploy.git
+skills/repo-sync/scripts/sync_gitea_to_github.py   --repo-dir /path/to/repo   --gitea-url https://<token>@gitea.example.com/org/repo.git   --github-url https://<token>@github.com/owner/repo.git
 ```
 
 ## Sync Detection
@@ -62,7 +63,8 @@ The Gitea-to-GitHub script treats a Gitea commit as already synced when either:
 2. An open GitHub pull request has the same core title.
 
 The core title is the commit or PR title after removing a trailing ` (#N)` suffix.
-Commit bodies are copied after removing `https://gitea.ai/...` URLs.
+Commit bodies are copied after removing URLs that point at the configured
+Gitea host.
 
 ## Conflict and Error Handling
 

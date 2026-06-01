@@ -14,11 +14,29 @@ import sys
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
-GITHUB_REPO = "tidbcloud/auto-deploy"
-GITEA_URL_RE = re.compile(r"https?://gitea\.ai/\S+")
 CREDENTIAL_URL_RE = re.compile(r"(https?://)[^\s/@]+@")
 TRAILING_PR_RE = re.compile(r"\s*\(#[0-9]+\)\s*$")
 NON_SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+
+def github_repo_name(github_url: str) -> str:
+    parts = urlsplit(github_url)
+    path = parts.path.removeprefix("/")
+    if path.endswith(".git"):
+        path = path[:-4]
+    if not path or "/" not in path:
+        raise argparse.ArgumentTypeError(f"invalid GitHub repo URL: {github_url}")
+    return path
+
+
+def gitea_url_pattern(gitea_url: str) -> re.Pattern[str]:
+    parts = urlsplit(gitea_url)
+    if parts.scheme not in {"http", "https"} or not parts.netloc:
+        raise argparse.ArgumentTypeError(f"invalid Gitea URL: {gitea_url}")
+    host = parts.hostname or parts.netloc.rsplit("@", 1)[-1]
+    if parts.port is not None and ":" not in host:
+        host = f"{host}:{parts.port}"
+    return re.compile(rf"{re.escape(parts.scheme)}://{re.escape(host)}/\S+")
 
 
 def redact_argument(argument: str) -> str:
@@ -30,7 +48,7 @@ def redact_argument(argument: str) -> str:
 
 
 def redact_text(text: str) -> str:
-    return CREDENTIAL_URL_RE.sub(r"\1<redacted>@", text)
+    return CREDENTIAL_URL_RE.sub(r"<redacted>@", text)
 
 
 def format_command(command: list[str]) -> str:
@@ -105,19 +123,21 @@ def slugify(title: str) -> str:
     return (slug or "commit")[:50].strip("-") or "commit"
 
 
-def rewrite_body(body: str) -> str:
-    body = GITEA_URL_RE.sub("", body)
+def rewrite_body(body: str, gitea_url_re: re.Pattern[str]) -> str:
+    body = gitea_url_re.sub("", body)
     lines = [line.rstrip() for line in body.splitlines()]
     while lines and not lines[0]:
         lines.pop(0)
     while lines and not lines[-1]:
         lines.pop()
-    return "\n".join(lines)
+    return "
+".join(lines)
 
 
 def commit_message(repo_dir: Path, sha: str) -> tuple[str, str]:
     raw_message = git_capture(repo_dir, "log", "-1", "--format=%B", sha)
-    title, _, body = raw_message.partition("\n")
+    title, _, body = raw_message.partition("
+")
     return title.strip(), body.strip()
 
 
@@ -126,14 +146,14 @@ def log_titles(repo_dir: Path, ref: str) -> set[str]:
     return {core_title(line) for line in output.splitlines() if line.strip()}
 
 
-def open_pr_titles() -> set[str]:
+def open_pr_titles(github_repo: str) -> set[str]:
     output = capture(
         [
             "gh",
             "pr",
             "list",
             "--repo",
-            GITHUB_REPO,
+            github_repo,
             "--state",
             "open",
             "--json",
@@ -180,9 +200,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--repo-dir", required=True, type=git_repo)
     parser.add_argument("--gitea-url", required=True)
     parser.add_argument("--github-url", required=True)
+    parser.add_argument("--github-repo")
     parser.add_argument("--main-branch", default="main")
     parser.add_argument("--dry-run", action="store_true")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if not args.github_repo:
+        args.github_repo = github_repo_name(args.github_url)
+    args.gitea_url_re = gitea_url_pattern(args.gitea_url)
+    return args
 
 
 def create_sync_pr(repo_dir: Path, sha: str, title: str, body: str, args: argparse.Namespace) -> str:
@@ -216,7 +241,7 @@ def create_sync_pr(repo_dir: Path, sha: str, title: str, body: str, args: argpar
         "pr",
         "create",
         "--repo",
-        GITHUB_REPO,
+        args.github_repo,
         "--base",
         args.main_branch,
         "--head",
@@ -228,7 +253,7 @@ def create_sync_pr(repo_dir: Path, sha: str, title: str, body: str, args: argpar
     ]
     pr_create = run(pr_command, check=False, dry_run=args.dry_run)
     if pr_create is not None and pr_create.returncode != 0:
-        print("warning: gh pr create failed: " + " ".join(pr_command))
+        print("warning: gh pr create failed: " + format_command(pr_command))
         return "skipped"
 
     print(f"synced {sha} as {branch}: {title}")
@@ -260,7 +285,7 @@ def sync(args: argparse.Namespace) -> None:
         github_titles = log_titles(args.repo_dir, f"_github/{args.main_branch}")
         commits = gitea_commits(args.repo_dir, args.main_branch)
         print(f"found {len(commits)} Gitea commits not on GitHub")
-        pr_titles = open_pr_titles() if commits else set()
+        pr_titles = open_pr_titles(args.github_repo) if commits else set()
         for sha in commits:
             original_title, original_body = commit_message(args.repo_dir, sha)
             rewritten_title = core_title(original_title)
@@ -276,7 +301,7 @@ def sync(args: argparse.Namespace) -> None:
                 args.repo_dir,
                 sha,
                 rewritten_title,
-                rewrite_body(original_body),
+                rewrite_body(original_body, args.gitea_url_re),
                 args,
             )
             if result == "synced":
