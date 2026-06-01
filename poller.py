@@ -5,9 +5,9 @@ Polling loop
 1. ``GET /api/v1/notifications?all=false`` — fetch only unread notifications.
 2. Filter to Issue/PR notifications triggered by a comment or mention.
 3. For each matching notification, run the agent inside a logfire span.
-4. In a ``finally`` block, mark the notification as read regardless of
-   whether the agent succeeded or raised — this prevents infinite retry
-   loops on persistent agent errors.
+4. Mark the notification as read only after it is successfully handled or
+   intentionally skipped. If the agent or an underlying tool raises, leave the
+   notification unread so it remains visible for retry or human intervention.
 
 Errors are not caught here; they propagate to the caller and exit the process.
 """
@@ -188,65 +188,73 @@ def _build_context_message(notif: dict[str, Any]) -> str:
     )
 
 
+async def _mark_notification_read(
+    http: httpx.AsyncClient,
+    notif_ctx: NotificationContext,
+) -> None:
+    await http.patch(f"/api/v1/notifications/threads/{notif_ctx.id}")
+
+
 async def _handle_notification(
     agent: Agent[AgentDeps, str],
     http: httpx.AsyncClient,
     notif: dict[str, Any],
     deps: AgentDeps,
 ) -> None:
-    """Run the agent for one notification, then mark it as read."""
+    """Run the agent for one notification, then mark it as read on success."""
     notif_ctx = NotificationContext(http=http, notif=notif)
 
-    try:
-        with logfire.span(
-            "notification {repo}#{number}",
-            repo=notif_ctx.repo_full_name,
-            number=notif_ctx.number,
-            notification_id=notif_ctx.id,
-        ):
-            subject = await notif_ctx.get_subject()
-            if _is_closed(subject):
-                logfire.info(
-                    "skip notification for closed subject",
-                    repo=notif_ctx.repo_full_name,
-                    number=notif_ctx.number,
-                )
-                return
-
-            if not await notif_ctx.is_subject_relevant_to_agent(
-                subject,
-                deps.gitea_username,
-            ):
-                logfire.info(
-                    "skip notification unrelated to agent",
-                    repo=notif_ctx.repo_full_name,
-                    number=notif_ctx.number,
-                    gitea_username=deps.gitea_username,
-                )
-                return
-
-            open_dependencies = await notif_ctx.open_dependencies()
-            if open_dependencies:
-                logfire.info(
-                    "skip notification with open dependencies",
-                    repo=notif_ctx.repo_full_name,
-                    number=notif_ctx.number,
-                    open_dependencies=len(open_dependencies),
-                )
-                return
-
-            result = await agent.run(
-                _build_context_message(notif),
-                deps=deps,
+    with logfire.span(
+        "notification {repo}#{number}",
+        repo=notif_ctx.repo_full_name,
+        number=notif_ctx.number,
+        notification_id=notif_ctx.id,
+    ):
+        subject = await notif_ctx.get_subject()
+        if _is_closed(subject):
+            logfire.info(
+                "skip notification for closed subject",
+                repo=notif_ctx.repo_full_name,
+                number=notif_ctx.number,
             )
-            logfire.info("agent output", output=result.output)
+            await _mark_notification_read(http, notif_ctx)
+            return
 
-            subject = await notif_ctx.get_subject()
-            if _is_closed(subject):
-                await notif_ctx.comment_on_open_blocks(subject)
-    finally:
-        # Always mark as read so we don't re-process on the next poll.
-        await http.patch(f"/api/v1/notifications/threads/{notif_ctx.id}")
+        if not await notif_ctx.is_subject_relevant_to_agent(
+            subject,
+            deps.gitea_username,
+        ):
+            logfire.info(
+                "skip notification unrelated to agent",
+                repo=notif_ctx.repo_full_name,
+                number=notif_ctx.number,
+                gitea_username=deps.gitea_username,
+            )
+            await _mark_notification_read(http, notif_ctx)
+            return
+
+        open_dependencies = await notif_ctx.open_dependencies()
+        if open_dependencies:
+            logfire.info(
+                "skip notification with open dependencies",
+                repo=notif_ctx.repo_full_name,
+                number=notif_ctx.number,
+                open_dependencies=len(open_dependencies),
+            )
+            await _mark_notification_read(http, notif_ctx)
+            return
+
+        result = await agent.run(
+            _build_context_message(notif),
+            deps=deps,
+        )
+        logfire.info("agent output", output=result.output)
+
+        subject = await notif_ctx.get_subject()
+        if _is_closed(subject):
+            await notif_ctx.comment_on_open_blocks(subject)
+
+        await _mark_notification_read(http, notif_ctx)
 
 
 async def poll_once(

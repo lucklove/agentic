@@ -24,7 +24,7 @@ There is no `pyproject.toml`; runtime dependencies and Python `>=3.14` live in t
 
 Polling opens `async with agent` once per profile, which starts profile-scoped capability lifecycles such as the Gitea MCP subprocess. A poll reads unread notifications, keeps only `Issue` and `Pull`, skips closed/unrelated/dependency-blocked subjects, then calls `agent.run(...)`.
 
-Notification threads are marked read in `poller._handle_notification` inside `finally`, even if the agent errors. Poller errors are not retried internally; they propagate and can terminate the process.
+Notification threads are marked read in `poller._handle_notification` only after they are successfully handled or intentionally skipped. Poller errors are not retried internally; they propagate and can terminate the process, and the notification remains unread for retry or human intervention.
 
 ## Configuration
 
