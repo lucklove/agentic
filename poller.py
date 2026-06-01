@@ -21,11 +21,15 @@ from typing import Any
 import httpx
 import logfire
 from pydantic_ai import Agent
+from pydantic_ai.usage import UsageLimits
 
 from deps import AgentDeps
 
 # Gitea notification subject types we care about.
 _SUBJECT_TYPES = frozenset({"Issue", "Pull"})
+
+# Allow longer autonomous notification-handling loops before pydantic-ai stops.
+_AGENT_RUN_USAGE_LIMITS = UsageLimits(request_limit=100)
 
 
 def _parse_number(url: str) -> str:
@@ -207,6 +211,7 @@ async def _handle_notification(
             result = await agent.run(
                 _build_context_message(notif),
                 deps=deps,
+                usage_limits=_AGENT_RUN_USAGE_LIMITS,
             )
             logfire.info("agent output", output=result.output)
 

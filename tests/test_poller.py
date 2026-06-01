@@ -43,12 +43,26 @@ class FakeHTTP:
 
 
 class PassingAgent:
-    async def run(self, message: str, deps: AgentDeps) -> SimpleNamespace:
+    def __init__(self) -> None:
+        self.usage_limits: object | None = None
+
+    async def run(
+        self,
+        message: str,
+        deps: AgentDeps,
+        usage_limits: object | None = None,
+    ) -> SimpleNamespace:
+        self.usage_limits = usage_limits
         return SimpleNamespace(output="done")
 
 
 class FailingAgent:
-    async def run(self, message: str, deps: AgentDeps) -> SimpleNamespace:
+    async def run(
+        self,
+        message: str,
+        deps: AgentDeps,
+        usage_limits: object | None = None,
+    ) -> SimpleNamespace:
         raise RuntimeError("simulated underlying tool failure")
 
 
@@ -93,9 +107,11 @@ def test_handle_notification_marks_thread_read_after_success(
 ) -> None:
     async def run() -> None:
         http = FakeHTTP()
+        agent = PassingAgent()
 
-        await _handle_notification(PassingAgent(), http, notification(), deps)
+        await _handle_notification(agent, http, notification(), deps)
 
+        assert getattr(agent.usage_limits, "request_limit") == 100
         assert http.patches == ["/api/v1/notifications/threads/123"]
 
     asyncio.run(run())
