@@ -22,6 +22,7 @@ skills_dir: "./skills"
 # same capability name replace the complete global config for that capability.
 capabilities:
   code_exec:
+  gitea:
   privacy:
     enabled: true
     placeholder_prefix: "__VG_"
