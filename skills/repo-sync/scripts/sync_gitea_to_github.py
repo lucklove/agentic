@@ -48,7 +48,7 @@ def redact_argument(argument: str) -> str:
 
 
 def redact_text(text: str) -> str:
-    return CREDENTIAL_URL_RE.sub(r"<redacted>@", text)
+    return CREDENTIAL_URL_RE.sub(r"\1<redacted>@", text)
 
 
 def format_command(command: list[str]) -> str:
@@ -130,14 +130,12 @@ def rewrite_body(body: str, gitea_url_re: re.Pattern[str]) -> str:
         lines.pop(0)
     while lines and not lines[-1]:
         lines.pop()
-    return "
-".join(lines)
+    return "\n".join(lines)
 
 
 def commit_message(repo_dir: Path, sha: str) -> tuple[str, str]:
     raw_message = git_capture(repo_dir, "log", "-1", "--format=%B", sha)
-    title, _, body = raw_message.partition("
-")
+    title, _, body = raw_message.partition("\n")
     return title.strip(), body.strip()
 
 

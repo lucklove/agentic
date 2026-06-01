@@ -11,6 +11,12 @@ Use this skill to synchronize changes between any GitHub repository and its
 corresponding Gitea mirror. Both repositories should use squash merge, because
 sync detection is based on matching the core commit title on each side.
 
+Only use this skill from an operations-oriented agent profile that is explicitly
+authorized to perform cross-forge sync work. General coding agents should fix or
+improve the skill itself in this repository, but should not execute repository
+synchronization tasks with it unless their task and profile explicitly allow
+that operational action.
+
 ## GitHub to Gitea
 
 Run `scripts/sync_github_to_gitea.py` to force-push GitHub `main` to Gitea
