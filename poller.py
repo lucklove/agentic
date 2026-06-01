@@ -164,12 +164,11 @@ class NotificationContext:
         }
 
     async def get_subject_comments(self) -> list[dict[str, Any]]:
-        path = "pulls" if self.subject_type == "Pull" else "issues"
         resp = await self.http.get(
             _SUBJECT_PATH_TEMPLATE.substitute(
                 owner=self.owner,
                 repo=self.repo,
-                path=path,
+                path="issues",
                 number=self.number,
             )
             + "/comments"

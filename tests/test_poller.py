@@ -48,7 +48,7 @@ class FakeHTTP:
         if path.endswith("/pulls/31"):
             return FakeResp(self.subject)
         if path.endswith("/pulls/31/comments"):
-            return FakeResp(self.comments)
+            raise AssertionError(path)
         if path.endswith("/pulls/31/reviews"):
             return FakeResp(self.reviews)
         raise AssertionError(path)
@@ -322,6 +322,8 @@ def test_handle_notification_marks_pull_thread_read_when_last_comment_mentions_a
         assert agent.run_deps is not None
         assert agent.run_deps.notification_subject is not None
         assert agent.run_deps.notification_subject.subject_type == "Pull"
+
+    asyncio.run(run())
 
 
 def test_handle_notification_logs_gitea_username_for_skips(
