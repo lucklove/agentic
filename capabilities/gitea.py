@@ -28,8 +28,9 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, Callable
 
+from fastmcp.client.transports import StdioTransport
 from pydantic_ai.capabilities import AbstractCapability
-from pydantic_ai.mcp import MCPServerStdio
+from pydantic_ai.mcp import MCPToolset
 from pydantic_ai.toolsets import AgentToolset, FilteredToolset
 
 from capabilities.base import make_name_filter
@@ -67,7 +68,7 @@ class GiteaMCPCapability(AbstractCapability[Any]):
     lifecycle because both implement the toolset async context protocol.
     """
 
-    _server: MCPServerStdio
+    _server: AgentToolset[Any]
     _filter: Callable[[Any], bool] | None  # None → expose all tools
 
     def get_instructions(self) -> str:
@@ -91,21 +92,22 @@ def make_gitea_capability(
     opts: dict[str, Any],
 ) -> GiteaMCPCapability:
     """Factory used by the capability registry in ``agent_factory``."""
-    server = MCPServerStdio(
-        mcp_command[0],
-        args=mcp_command[1:],
-        env={
-            "GITEA_HOST": base_url,
-            "GITEA_ACCESS_TOKEN": token,
-            # Bypass Go module proxy and checksum DB for the local gitea.ai domain
-            # (which may only be resolvable via /etc/hosts and not reachable by the proxy).
-            "GOPRIVATE": "gitea.ai",
-            "GONOSUMDB": "gitea.ai",
-            "GOINSECURE": "gitea.ai",
-        },
+    server = MCPToolset(
+        StdioTransport(
+            mcp_command[0],
+            args=mcp_command[1:],
+            env={
+                "GITEA_HOST": base_url,
+                "GITEA_ACCESS_TOKEN": token,
+                # Bypass Go module proxy and checksum DB for the local gitea.ai domain
+                # (which may only be resolvable via /etc/hosts and not reachable by the proxy).
+                "GOPRIVATE": "gitea.ai",
+                "GONOSUMDB": "gitea.ai",
+                "GOINSECURE": "gitea.ai",
+            },
+        ),
         include_instructions=False,
-        tool_prefix="gitea",
-    )
+    ).prefixed("gitea")
     return GiteaMCPCapability(
         _server=server,
         _filter=make_name_filter(opts),
