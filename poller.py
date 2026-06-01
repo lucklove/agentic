@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, replace
+import re
 from string import Template
 from typing import Any
 
@@ -36,6 +37,7 @@ _SUBJECT_PATH_TEMPLATE = Template("/api/v1/repos/$owner/$repo/$path/$number")
 _DEPENDENCIES_PATH_TEMPLATE = Template(
     "/api/v1/repos/$owner/$repo/issues/$number/dependencies"
 )
+_MENTION_PATTERN = re.compile(r"(?:^|\W)@([A-Za-z0-9._-]+)(?=\W|$)")
 _CONTEXT_MESSAGE_TEMPLATE = Template(
     """New notification
 Repository: $repo
@@ -82,6 +84,10 @@ def _collect_users(item: dict[str, Any]) -> set[str]:
 
 def _is_closed(item: dict[str, Any]) -> bool:
     return item.get("state") == "closed" or item.get("closed_at") is not None
+
+
+def _mentioned_users(body: str) -> set[str]:
+    return {match.group(1) for match in _MENTION_PATTERN.finditer(body)}
 
 
 @dataclass
@@ -157,11 +163,42 @@ class NotificationContext:
             user for user in (_login(review.get("user")) for review in reviews) if user
         }
 
+    async def get_subject_comments(self) -> list[dict[str, Any]]:
+        path = "pulls" if self.subject_type == "Pull" else "issues"
+        resp = await self.http.get(
+            _SUBJECT_PATH_TEMPLATE.substitute(
+                owner=self.owner,
+                repo=self.repo,
+                path=path,
+                number=self.number,
+            )
+            + "/comments"
+        )
+        resp.raise_for_status()
+        comments: list[dict[str, Any]] = resp.json()
+        return comments
+
+    async def get_last_subject_comment(self) -> dict[str, Any] | None:
+        comments = await self.get_subject_comments()
+        if not comments:
+            return None
+
+        return comments[-1]
+
     async def is_subject_relevant_to_agent(
         self,
         subject: dict[str, Any],
         gitea_username: str,
     ) -> bool:
+        last_comment = await self.get_last_subject_comment()
+        if last_comment is not None:
+            if _login(last_comment.get("user")) == gitea_username:
+                return False
+
+            mentioned_users = _mentioned_users(last_comment.get("body") or "")
+            if mentioned_users:
+                return gitea_username in mentioned_users
+
         users = _collect_users(subject)
 
         if self.subject_type == "Pull" and gitea_username not in users:

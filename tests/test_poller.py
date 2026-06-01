@@ -22,20 +22,35 @@ class FakeResp:
 
 
 class FakeHTTP:
-    def __init__(self, subject: dict[str, object] | None = None) -> None:
+    def __init__(
+        self,
+        subject: dict[str, object] | None = None,
+        comments: list[dict[str, object]] | None = None,
+        reviews: list[dict[str, object]] | None = None,
+    ) -> None:
         self.subject = subject or {
             "state": "open",
             "closed_at": None,
             "user": {"login": "human"},
             "assignees": [{"login": "code_agent"}],
         }
+        self.comments = comments or []
+        self.reviews = reviews or []
         self.patches: list[str] = []
 
     async def get(self, path: str, params: dict[str, str] | None = None) -> FakeResp:
         if path.endswith("/issues/31"):
             return FakeResp(self.subject)
+        if path.endswith("/issues/31/comments"):
+            return FakeResp(self.comments)
         if path.endswith("/issues/31/dependencies"):
             return FakeResp([])
+        if path.endswith("/pulls/31"):
+            return FakeResp(self.subject)
+        if path.endswith("/pulls/31/comments"):
+            return FakeResp(self.comments)
+        if path.endswith("/pulls/31/reviews"):
+            return FakeResp(self.reviews)
         raise AssertionError(path)
 
     async def patch(self, path: str) -> FakeResp:
@@ -79,13 +94,14 @@ def deps() -> AgentDeps:
     )
 
 
-def notification() -> dict[str, object]:
+def notification(subject_type: str = "Issue") -> dict[str, object]:
+    path = "pulls" if subject_type == "Pull" else "issues"
     return {
         "id": 123,
         "repository": {"full_name": "autonomous/agentic"},
         "subject": {
-            "type": "Issue",
-            "url": "http://gitea.example/api/v1/repos/autonomous/agentic/issues/31",
+            "type": subject_type,
+            "url": f"http://gitea.example/api/v1/repos/autonomous/agentic/{path}/31",
             "title": "bug",
         },
     }
@@ -134,6 +150,178 @@ def test_handle_notification_marks_thread_read_after_success(
         assert http.patches == ["/api/v1/notifications/threads/123"]
 
     asyncio.run(run())
+
+
+def test_handle_notification_marks_thread_read_when_last_comment_mentions_agent(
+    deps: AgentDeps,
+) -> None:
+    async def run() -> None:
+        http = FakeHTTP(
+            subject={
+                "state": "open",
+                "closed_at": None,
+                "user": {"login": "human"},
+                "assignees": [],
+            },
+            comments=[
+                {
+                    "body": "Please take a look @code_agent",
+                    "user": {"login": "human"},
+                }
+            ],
+        )
+        agent = PassingAgent()
+
+        await _handle_notification(agent, http, notification(), deps)
+
+        assert http.patches == ["/api/v1/notifications/threads/123"]
+        assert agent.run_deps is not None
+
+    asyncio.run(run())
+
+
+def test_handle_notification_uses_existing_relevance_when_last_comment_has_no_mentions(
+    deps: AgentDeps,
+) -> None:
+    async def run() -> None:
+        http = FakeHTTP(
+            subject={
+                "state": "open",
+                "closed_at": None,
+                "user": {"login": "human"},
+                "assignees": [{"login": "code_agent"}],
+            },
+            comments=[
+                {
+                    "body": "No direct mention here.",
+                    "user": {"login": "human"},
+                }
+            ],
+        )
+        agent = PassingAgent()
+
+        await _handle_notification(agent, http, notification(), deps)
+
+        assert http.patches == ["/api/v1/notifications/threads/123"]
+        assert agent.run_deps is not None
+
+    asyncio.run(run())
+
+
+def test_handle_notification_skips_when_last_comment_mentions_someone_else(
+    deps: AgentDeps,
+) -> None:
+    async def run() -> None:
+        http = FakeHTTP(
+            subject={
+                "state": "open",
+                "closed_at": None,
+                "user": {"login": "human"},
+                "assignees": [{"login": "code_agent"}],
+            },
+            comments=[
+                {
+                    "body": "Please check this @review_agent",
+                    "user": {"login": "human"},
+                }
+            ],
+        )
+        agent = PassingAgent()
+
+        await _handle_notification(agent, http, notification(), deps)
+
+        assert http.patches == ["/api/v1/notifications/threads/123"]
+        assert agent.run_deps is None
+
+    asyncio.run(run())
+
+
+def test_handle_notification_skips_when_last_comment_is_by_agent(
+    deps: AgentDeps,
+) -> None:
+    async def run() -> None:
+        http = FakeHTTP(
+            subject={
+                "state": "open",
+                "closed_at": None,
+                "user": {"login": "human"},
+                "assignees": [{"login": "code_agent"}],
+            },
+            comments=[
+                {
+                    "body": "I already handled this @code_agent",
+                    "user": {"login": "code_agent"},
+                }
+            ],
+        )
+        agent = PassingAgent()
+
+        await _handle_notification(agent, http, notification(), deps)
+
+        assert http.patches == ["/api/v1/notifications/threads/123"]
+        assert agent.run_deps is None
+
+    asyncio.run(run())
+
+
+def test_handle_notification_skips_pull_when_last_comment_mentions_someone_else(
+    deps: AgentDeps,
+) -> None:
+    async def run() -> None:
+        http = FakeHTTP(
+            subject={
+                "state": "open",
+                "closed_at": None,
+                "user": {"login": "human"},
+                "assignees": [],
+                "requested_reviewers": [{"login": "code_agent"}],
+                "reviewers": [],
+            },
+            comments=[
+                {
+                    "body": "Can you review this? @review_agent",
+                    "user": {"login": "human"},
+                }
+            ],
+        )
+        agent = PassingAgent()
+
+        await _handle_notification(agent, http, notification("Pull"), deps)
+
+        assert http.patches == ["/api/v1/notifications/threads/123"]
+        assert agent.run_deps is None
+
+    asyncio.run(run())
+
+
+def test_handle_notification_marks_pull_thread_read_when_last_comment_mentions_agent(
+    deps: AgentDeps,
+) -> None:
+    async def run() -> None:
+        http = FakeHTTP(
+            subject={
+                "state": "open",
+                "closed_at": None,
+                "user": {"login": "human"},
+                "assignees": [],
+                "requested_reviewers": [],
+                "reviewers": [],
+            },
+            comments=[
+                {
+                    "body": "Can you review this? @code_agent",
+                    "user": {"login": "human"},
+                }
+            ],
+        )
+        agent = PassingAgent()
+
+        await _handle_notification(agent, http, notification("Pull"), deps)
+
+        assert http.patches == ["/api/v1/notifications/threads/123"]
+        assert agent.run_deps is not None
+        assert agent.run_deps.notification_subject is not None
+        assert agent.run_deps.notification_subject.subject_type == "Pull"
 
 
 def test_handle_notification_logs_gitea_username_for_skips(
