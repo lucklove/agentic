@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from deps import AgentDeps
-from poller import _handle_notification
+from poller import _build_context_message, _handle_notification
 
 
 class FakeResp:
@@ -86,6 +86,17 @@ def notification() -> dict[str, object]:
             "title": "bug",
         },
     }
+
+
+def test_build_context_message_includes_shared_rules() -> None:
+    message = _build_context_message(notification())
+
+    assert "Shared notification-handling rules" in message
+    assert "if someone @mentions you" in message
+    assert "Do not react to your own comments" in message
+    assert "Read the project's AGENTS.md" in message
+    assert "Read the full relevant thread and supporting context before acting" in message
+    assert "If no action is required, explain why" in message
 
 
 def test_handle_notification_leaves_thread_unread_when_agent_fails(

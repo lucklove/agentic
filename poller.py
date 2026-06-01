@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from string import Template
 from typing import Any
 
 import httpx
@@ -30,6 +31,26 @@ _SUBJECT_TYPES = frozenset({"Issue", "Pull"})
 
 # Default for longer autonomous notification-handling loops before pydantic-ai stops.
 DEFAULT_AGENT_REQUEST_LIMIT = 100
+
+_SUBJECT_PATH_TEMPLATE = Template("/api/v1/repos/$owner/$repo/$path/$number")
+_DEPENDENCIES_PATH_TEMPLATE = Template(
+    "/api/v1/repos/$owner/$repo/issues/$number/dependencies"
+)
+_CONTEXT_MESSAGE_TEMPLATE = Template(
+    """New notification
+Repository: $repo
+Type: $type_label #$number
+Title: $title
+
+Use your available tools to read the full context of $type_label #$number in $repo before deciding what action to take, then take the required action now when your available tools allow it.
+
+Shared notification-handling rules:
+- Highest priority: if someone @mentions you in the issue or pull request, reply with an @mention back to that person unless the task is completed during this turn; if it is completed, finish by applying the appropriate final state change for the issue or PR instead of posting a separate follow-up reply.
+- Do not react to your own comments. Exception: replying to someone else with an @mention inside an issue or PR you created does not count as reacting to your own comment.
+- Read the project's AGENTS.md.
+- Read the full relevant thread and supporting context before acting.
+- If no action is required, explain why."""
+)
 
 
 def _agent_run_usage_limits(request_limit: int) -> UsageLimits:
@@ -106,21 +127,36 @@ class NotificationContext:
     async def get_subject(self) -> dict[str, Any]:
         path = "pulls" if self.subject_type == "Pull" else "issues"
         resp = await self.http.get(
-            f"/api/v1/repos/{self.owner}/{self.repo}/{path}/{self.number}"
+            _SUBJECT_PATH_TEMPLATE.substitute(
+                owner=self.owner,
+                repo=self.repo,
+                path=path,
+                number=self.number,
+            )
         )
         resp.raise_for_status()
         return resp.json()
 
     async def get_dependencies(self) -> list[dict[str, Any]]:
         resp = await self.http.get(
-            f"/api/v1/repos/{self.owner}/{self.repo}/issues/{self.number}/dependencies"
+            _DEPENDENCIES_PATH_TEMPLATE.substitute(
+                owner=self.owner,
+                repo=self.repo,
+                number=self.number,
+            )
         )
         resp.raise_for_status()
         return resp.json()
 
     async def collect_pr_reviewers(self) -> set[str]:
         resp = await self.http.get(
-            f"/api/v1/repos/{self.owner}/{self.repo}/pulls/{self.number}/reviews"
+            _SUBJECT_PATH_TEMPLATE.substitute(
+                owner=self.owner,
+                repo=self.repo,
+                path="pulls",
+                number=self.number,
+            )
+            + "/reviews"
         )
         resp.raise_for_status()
         reviews: list[dict[str, Any]] = resp.json()
@@ -155,13 +191,11 @@ def _build_context_message(notif: dict[str, Any]) -> str:
 
     type_label = "issue" if subject_type == "Issue" else "pull request"
 
-    return (
-        f"New notification\n"
-        f"Repository: {repo}\n"
-        f"Type: {type_label} #{number}\n"
-        f"Title: {title}\n\n"
-        f"Use your Gitea tools to read the full context of {type_label} #{number} "
-        f"in {repo} (body and all comments), then decide what action to take."
+    return _CONTEXT_MESSAGE_TEMPLATE.substitute(
+        repo=repo,
+        type_label=type_label,
+        number=number,
+        title=title,
     )
 
 
