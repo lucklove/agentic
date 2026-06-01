@@ -18,6 +18,9 @@ working_dir: "."
 # by name via capabilities.skills.names.
 skills_dir: "./skills"
 
+# Maximum pydantic-ai model requests allowed per notification-handling run.
+agent_request_limit: 100
+
 # Capabilities enabled for all profiles by default. Profile entries with the
 # same capability name replace the complete global config for that capability.
 capabilities:
