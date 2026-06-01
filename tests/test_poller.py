@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -131,5 +132,39 @@ def test_handle_notification_marks_thread_read_after_success(
         assert agent.run_deps.notification_subject.subject_type == "Issue"
         assert deps.notification_subject is None
         assert http.patches == ["/api/v1/notifications/threads/123"]
+
+    asyncio.run(run())
+
+
+def test_handle_notification_logs_gitea_username_for_skips(
+    deps: AgentDeps,
+) -> None:
+    async def run() -> None:
+        closed_http = FakeHTTP(subject={
+            "state": "closed",
+            "closed_at": "2026-01-01T00:00:00Z",
+            "user": {"login": "human"},
+            "assignees": [{"login": "code_agent"}],
+        })
+        unrelated_http = FakeHTTP(subject={
+            "state": "open",
+            "closed_at": None,
+            "user": {"login": "human"},
+            "assignees": [],
+        })
+
+        async def open_dependencies(self) -> list[dict[str, object]]:
+            return [{"state": "open", "number": 99}]
+
+        with patch("poller.logfire.info") as info:
+            await _handle_notification(PassingAgent(), closed_http, notification(), deps)
+            await _handle_notification(PassingAgent(), unrelated_http, notification(), deps)
+            with patch("poller.NotificationContext.open_dependencies", new=open_dependencies):
+                await _handle_notification(PassingAgent(), FakeHTTP(), notification(), deps)
+
+        skip_calls = [call for call in info.call_args_list if call.args[0].startswith("skip notification")]
+        assert len(skip_calls) == 3
+        for call in skip_calls:
+            assert call.kwargs["gitea_username"] == "code_agent"
 
     asyncio.run(run())

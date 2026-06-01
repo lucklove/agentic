@@ -221,6 +221,7 @@ async def _handle_notification(
                 "skip notification for closed subject",
                 repo=notif_ctx.repo_full_name,
                 number=notif_ctx.number,
+                gitea_username=deps.gitea_username,
             )
         elif not await notif_ctx.is_subject_relevant_to_agent(
             subject,
@@ -237,6 +238,7 @@ async def _handle_notification(
                 "skip notification with open dependencies",
                 repo=notif_ctx.repo_full_name,
                 number=notif_ctx.number,
+                gitea_username=deps.gitea_username,
                 open_dependencies=len(open_dependencies),
             )
         else:
