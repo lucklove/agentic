@@ -24,9 +24,9 @@ capabilities:
   code_exec:
   gitea:
   openai_compaction:
-    token_threshold: 150000
+    token_threshold: 1500000
   anthropic_compaction:
-    token_threshold: 150000
+    token_threshold: 1500000
   privacy:
     enabled: true
     placeholder_prefix: "__VG_"
