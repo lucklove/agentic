@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from capabilities.notification_rules import NotificationRulesCapability
+from capabilities.harness import HarnessCapability
 from deps import AgentDeps, NotificationSubject
 
 
@@ -27,15 +27,15 @@ def deps() -> AgentDeps:
 
 
 def test_instructions_include_shared_rules() -> None:
-    instructions = NotificationRulesCapability().get_instructions()
+    instructions = HarnessCapability().get_instructions()
 
-    assert "Notification-Handling Rules" in instructions
+    assert "Harness Rules" in instructions
     assert "Do not react to your own comments" in instructions
-    assert "Read the project's AGENTS.md" in instructions
+    assert "Read the full relevant issue or pull request context before acting." in instructions
 
 
 def test_before_output_process_allows_missing_subject(deps: AgentDeps) -> None:
-    cap = NotificationRulesCapability()
+    cap = HarnessCapability()
     ctx = SimpleNamespace(
         deps=AgentDeps(
             backend=deps.backend,
@@ -55,7 +55,7 @@ def test_before_output_process_allows_missing_subject(deps: AgentDeps) -> None:
 
 
 def test_before_output_process_allows_partial_output(deps: AgentDeps) -> None:
-    cap = NotificationRulesCapability()
+    cap = HarnessCapability()
     ctx = SimpleNamespace(deps=deps, partial_output=True)
 
     output = asyncio.run(
@@ -68,7 +68,7 @@ def test_before_output_process_allows_partial_output(deps: AgentDeps) -> None:
 def test_before_output_process_allows_when_last_comment_does_not_mention_agent(
     deps: AgentDeps,
 ) -> None:
-    cap = NotificationRulesCapability()
+    cap = HarnessCapability()
     ctx = SimpleNamespace(deps=deps, partial_output=False)
 
     with patch.object(
@@ -86,7 +86,7 @@ def test_before_output_process_allows_when_last_comment_does_not_mention_agent(
 def test_before_output_process_raises_when_last_comment_mentions_agent(
     deps: AgentDeps,
 ) -> None:
-    cap = NotificationRulesCapability()
+    cap = HarnessCapability()
     ctx = SimpleNamespace(deps=deps, partial_output=False)
 
     with patch.object(

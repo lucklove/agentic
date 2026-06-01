@@ -4,7 +4,7 @@ from pydantic_ai.models.anthropic import AnthropicCompaction
 from pydantic_ai.models.openai import OpenAICompaction
 
 from agent_factory import _build_registry
-from capabilities.notification_rules import NotificationRulesCapability
+from capabilities.harness import HarnessCapability
 from config import GlobalConfig, GiteaGlobalConfig, GiteaProfileConfig, ProfileConfig
 
 
@@ -41,7 +41,7 @@ def test_registry_builds_anthropic_compaction() -> None:
     assert capability.token_threshold == 100_000
 
 
-def test_registry_builds_notification_rules() -> None:
-    capability = _registry()["notification_rules"]({})
+def test_registry_builds_harness() -> None:
+    capability = _registry()["harness"]({})
 
-    assert isinstance(capability, NotificationRulesCapability)
+    assert isinstance(capability, HarnessCapability)
