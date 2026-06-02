@@ -11,5 +11,8 @@ profiles/*.yaml
 # Memory store files
 memories/
 
+# Local git worktrees
+.worktrees/
+
 # OS
 .DS_Store

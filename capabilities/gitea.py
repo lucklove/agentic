@@ -99,6 +99,9 @@ def make_gitea_capability(
             env={
                 "GITEA_HOST": base_url,
                 "GITEA_ACCESS_TOKEN": token,
+                # Force direct resolution for the internal gitea.ai module path.
+                # Some environments default to public proxies that cannot serve it.
+                "GOPROXY": "direct",
                 # Bypass Go module proxy and checksum DB for the local gitea.ai domain
                 # (which may only be resolvable via /etc/hosts and not reachable by the proxy).
                 "GOPRIVATE": "gitea.ai",
