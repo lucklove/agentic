@@ -105,7 +105,7 @@ async def _poll_profile(profile_name: str) -> None:
 
 
 async def run_profiles(profile_names: list[str]) -> None:
-    logfire.configure(send_to_logfire="if-token-present")
+    logfire.configure(send_to_logfire="if-token-present", scrubbing=False)
     logfire.instrument_pydantic_ai()
 
     results = await asyncio.gather(
@@ -118,7 +118,7 @@ async def run_profiles(profile_names: list[str]) -> None:
 
 
 async def run_instruction(profile_name: str, instruction: str) -> None:
-    logfire.configure(send_to_logfire="if-token-present")
+    logfire.configure(send_to_logfire="if-token-present", scrubbing=False)
     logfire.instrument_pydantic_ai()
 
     runtime = await _build_runtime(profile_name)
