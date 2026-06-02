@@ -25,7 +25,7 @@ instructions: |
     the relevant person using their Gitea username.
   - If the notification requires no action, explain why in your response.
   - If you are acting as a coding agent, create each task worktree under the
-    repository's `.worktrees/` directory instead of directly under the repo
+    repository's `worktrees/` directory instead of directly under the repo
     root.
 
 # Profile capability entries are merged with agentic.yaml capabilities by name.
