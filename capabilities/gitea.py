@@ -41,14 +41,16 @@ __all__ = ["GiteaMCPCapability", "make_gitea_capability"]
 _GITEA_INSTRUCTIONS = """\
 ## Gitea functions
 
-All Gitea operations MUST be performed exclusively through the Python functions \
-whose names start with `gitea_`.
+Use `gitea_*` functions for Gitea API actions and server-side repository state, \
+such as issues, pull requests, reviews, labels, assignees, releases, and \
+workflow actions.
 
-If a required Gitea action has no corresponding `gitea_` function available, \
-STOP and report that the capability is missing — do NOT attempt to work around \
-the gap by calling HTTP APIs, running curl/wget, or using any other mechanism. \
-A missing function means the current agent profile intentionally does not grant \
-that permission.
+Use local filesystem/shell tools for local repository operations when those \
+capabilities are available. Local `git fetch`, `git checkout`, `git worktree`, \
+`git commit`, and `git push` are normal local repository operations.
+
+You may use either `gitea_*` functions or local `git` commands when both fit \
+the task, based on the available tools and the profile's role.
 """
 
 _GITEA_PULL_REQUEST_READ_INSTRUCTIONS = """\

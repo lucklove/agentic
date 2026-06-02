@@ -15,6 +15,14 @@ def _capability(opts: dict) -> GiteaMCPCapability:
 def test_gitea_instructions_include_pr_review_comments_when_unfiltered() -> None:
     instructions = _capability({}).get_instructions()
 
+    assert "Use `gitea_*` functions for Gitea API actions" in instructions
+    assert (
+        "Use local filesystem/shell tools for local repository operations"
+        in instructions
+    )
+    assert (
+        "You may use either `gitea_*` functions or local `git` commands" in instructions
+    )
     assert "gitea_pull_request_read" in instructions
     assert 'method="get_review_comments"' in instructions
     assert "review_id" in instructions

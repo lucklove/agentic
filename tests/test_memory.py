@@ -12,6 +12,8 @@ def test_memory_instructions_include_memory_hygiene_rules() -> None:
 
     assert "If run_code fails but you later identify the cause" in instructions
     assert "save that lesson to memory" in instructions
+    assert "Only save confirmed, reusable lessons" in instructions
+    assert "assumed capability limitation" in instructions
     assert (
         "If you discover an existing memory is outdated or no longer useful"
         in instructions

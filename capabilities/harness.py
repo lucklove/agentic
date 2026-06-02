@@ -8,12 +8,12 @@ from typing import Any
 import httpx
 from pydantic_ai import ModelRetry
 from pydantic_ai.capabilities import AbstractCapability
+from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.tools import RunContext
 
 from deps import AgentDeps, NotificationSubject
 
-_HARNESS_INSTRUCTIONS = """\
-## Harness Rules
+_HARNESS_INSTRUCTIONS = """## Harness Rules
 
 - Highest priority:
   - if the last message in the issue or pull request @mentions you, choose exactly one of these actions:
@@ -23,6 +23,12 @@ _HARNESS_INSTRUCTIONS = """\
   - if the last message in the issue or pull request @mentions someone else, do nothing.
 - Do not react to your own comments, except that you are mentioned in the last message.
 - Read the full relevant issue or pull request context before acting.
+- If checks are pending, wait and poll again instead of concluding immediately.
+  When shell execution is available, prefer `execute("sleep N")` for a short
+  wait before checking status again.
+- If a PR is blocked by failing checks or requested changes, do the required
+  follow-up work first; do not treat the inability to request review or merge
+  yet as a final blocker by itself.
 - If the work is complete and the subject is a PR that has already been approved, merge it with `gitea_pull_request_write` using `method: "merge"`, `merge_style: "squash"`, and `delete_branch: true`.
 - If the work is complete and the subject is an issue that is not associated with an open PR, and you judge the issue is resolved, close the issue directly.
 - If no action is required, explain why.
@@ -50,6 +56,40 @@ class HarnessCapability(AbstractCapability[AgentDeps]):
 
     def get_instructions(self) -> str:
         return _HARNESS_INSTRUCTIONS
+
+    async def before_tool_execute(
+        self,
+        ctx: RunContext[AgentDeps],
+        *,
+        call: ToolCallPart,
+        tool_def: Any,
+        args: dict[str, Any],
+    ) -> dict[str, Any]:
+        if tool_def.name != "gitea_pull_request_write":
+            return args
+        if args.get("method") != "add_reviewers":
+            return args
+
+        owner = args.get("owner")
+        repo = args.get("repo")
+        pull_number = args.get("pull_number")
+        if not owner or not repo or pull_number is None:
+            return args
+
+        failing_checks = await self._get_non_successful_checks(
+            owner=owner,
+            repo=repo,
+            pull_number=pull_number,
+            deps=ctx.deps,
+        )
+        if failing_checks:
+            checks = ", ".join(failing_checks)
+            raise ModelRetry(
+                "Cannot request review yet because these checks are not passing: "
+                f"{checks}. Wait for them to succeed or fix the failures first."
+            )
+
+        return args
 
     async def before_output_process(
         self,
@@ -94,14 +134,7 @@ class HarnessCapability(AbstractCapability[AgentDeps]):
         subject: NotificationSubject,
         deps: AgentDeps,
     ) -> bool:
-        headers = {
-            "Authorization": f"token {deps.gitea_token}",
-            "Content-Type": "application/json",
-        }
-        async with httpx.AsyncClient(
-            base_url=deps.gitea_base_url,
-            headers=headers,
-        ) as http:
+        async with self._gitea_client(deps) as http:
             resp = await http.get(_subject_path(subject))
             resp.raise_for_status()
             item: dict[str, Any] = resp.json()
@@ -112,15 +145,50 @@ class HarnessCapability(AbstractCapability[AgentDeps]):
         subject: NotificationSubject,
         deps: AgentDeps,
     ) -> dict[str, Any] | None:
-        headers = {
-            "Authorization": f"token {deps.gitea_token}",
-            "Content-Type": "application/json",
-        }
-        async with httpx.AsyncClient(
-            base_url=deps.gitea_base_url,
-            headers=headers,
-        ) as http:
+        async with self._gitea_client(deps) as http:
             resp = await http.get(_comments_path(subject))
             resp.raise_for_status()
             comments: list[dict[str, Any]] = resp.json()
         return comments[-1] if comments else None
+
+    async def _get_non_successful_checks(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        pull_number: int | float | str,
+        deps: AgentDeps,
+    ) -> list[str]:
+        async with self._gitea_client(deps) as http:
+            pr_resp = await http.get(
+                f"/api/v1/repos/{owner}/{repo}/pulls/{pull_number}"
+            )
+            pr_resp.raise_for_status()
+            pr: dict[str, Any] = pr_resp.json()
+            head = pr.get("head") or {}
+            sha = head.get("sha")
+            if not sha:
+                return []
+
+            status_resp = await http.get(
+                f"/api/v1/repos/{owner}/{repo}/commits/{sha}/status"
+            )
+            status_resp.raise_for_status()
+            payload: dict[str, Any] = status_resp.json()
+
+        statuses = payload.get("statuses") or []
+        failing: list[str] = []
+        for status in statuses:
+            state = status.get("status")
+            if state == "success":
+                continue
+            name = status.get("context") or status.get("target_url") or "unknown"
+            failing.append(f"{name} ({state or 'unknown'})")
+        return failing
+
+    def _gitea_client(self, deps: AgentDeps) -> httpx.AsyncClient:
+        headers = {
+            "Authorization": f"token {deps.gitea_token}",
+            "Content-Type": "application/json",
+        }
+        return httpx.AsyncClient(base_url=deps.gitea_base_url, headers=headers)

@@ -4,6 +4,7 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 from pydantic_ai import ModelRetry
 
@@ -38,6 +39,10 @@ def test_instructions_include_shared_rules() -> None:
         "Read the full relevant issue or pull request context before acting."
         in instructions
     )
+    assert "If checks are pending, wait and poll again" in instructions
+    assert 'prefer `execute("sleep N")`' in instructions
+    assert "If a PR is blocked by failing checks or requested changes" in instructions
+    assert "do not treat the inability to request review or merge" in instructions
     assert "gitea_pull_request_write" in instructions
     assert '`method: "merge"`' in instructions
     assert '`merge_style: "squash"`' in instructions
@@ -53,6 +58,155 @@ def test_instructions_include_shared_rules() -> None:
         "post a helpful comment with relevant information by calling `gitea_issue_write` and do not @mention anyone"
         in instructions
     )
+
+
+def test_before_tool_execute_allows_non_review_request_tool(deps: AgentDeps) -> None:
+    cap = HarnessCapability()
+    ctx = SimpleNamespace(deps=deps)
+    tool_def = SimpleNamespace(name="gitea_issue_write")
+    args = {"method": "add_reviewers", "owner": "autonomous", "repo": "agentic"}
+
+    output = asyncio.run(
+        cap.before_tool_execute(
+            ctx,
+            call=SimpleNamespace(),
+            tool_def=tool_def,
+            args=args,
+        )
+    )
+
+    assert output == args
+
+
+def test_before_tool_execute_allows_other_pull_request_methods(deps: AgentDeps) -> None:
+    cap = HarnessCapability()
+    ctx = SimpleNamespace(deps=deps)
+    tool_def = SimpleNamespace(name="gitea_pull_request_write")
+    args = {"method": "merge", "owner": "autonomous", "repo": "agentic"}
+
+    output = asyncio.run(
+        cap.before_tool_execute(
+            ctx,
+            call=SimpleNamespace(),
+            tool_def=tool_def,
+            args=args,
+        )
+    )
+
+    assert output == args
+
+
+def test_before_tool_execute_allows_review_request_without_checks(
+    deps: AgentDeps,
+) -> None:
+    cap = HarnessCapability()
+    ctx = SimpleNamespace(deps=deps)
+    tool_def = SimpleNamespace(name="gitea_pull_request_write")
+    args = {
+        "method": "add_reviewers",
+        "owner": "autonomous",
+        "repo": "agentic",
+        "pull_number": 82,
+    }
+
+    with patch.object(
+        cap,
+        "_get_non_successful_checks",
+        AsyncMock(return_value=[]),
+    ):
+        output = asyncio.run(
+            cap.before_tool_execute(
+                ctx,
+                call=SimpleNamespace(),
+                tool_def=tool_def,
+                args=args,
+            )
+        )
+
+    assert output == args
+
+
+def test_before_tool_execute_blocks_review_request_with_failing_checks(
+    deps: AgentDeps,
+) -> None:
+    cap = HarnessCapability()
+    ctx = SimpleNamespace(deps=deps)
+    tool_def = SimpleNamespace(name="gitea_pull_request_write")
+    args = {
+        "method": "add_reviewers",
+        "owner": "autonomous",
+        "repo": "agentic",
+        "pull_number": 82,
+    }
+
+    with patch.object(
+        cap,
+        "_get_non_successful_checks",
+        AsyncMock(return_value=["ci/test (failure)", "lint (pending)"]),
+    ):
+        with pytest.raises(ModelRetry, match=r"ci/test \(failure\), lint \(pending\)"):
+            asyncio.run(
+                cap.before_tool_execute(
+                    ctx,
+                    call=SimpleNamespace(),
+                    tool_def=tool_def,
+                    args=args,
+                )
+            )
+
+
+def test_get_non_successful_checks_returns_only_non_success_statuses(
+    deps: AgentDeps,
+) -> None:
+    cap = HarnessCapability()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/repos/autonomous/agentic/pulls/82":
+            return httpx.Response(200, json={"head": {"sha": "abc123"}})
+        if request.url.path == "/api/v1/repos/autonomous/agentic/commits/abc123/status":
+            return httpx.Response(
+                200,
+                json={
+                    "statuses": [
+                        {"context": "ci/test", "status": "failure"},
+                        {"context": "lint", "status": "pending"},
+                        {"context": "typecheck", "status": "success"},
+                        {"target_url": "http://example/check", "status": "error"},
+                        {"status": None},
+                    ]
+                },
+            )
+        raise AssertionError(f"Unexpected request path: {request.url.path}")
+
+    transport = httpx.MockTransport(handler)
+
+    with patch.object(
+        cap,
+        "_gitea_client",
+        return_value=httpx.AsyncClient(
+            base_url=deps.gitea_base_url,
+            headers={
+                "Authorization": f"token {deps.gitea_token}",
+                "Content-Type": "application/json",
+            },
+            transport=transport,
+        ),
+    ):
+        checks = asyncio.run(
+            cap._get_non_successful_checks(
+                owner="autonomous",
+                repo="agentic",
+                pull_number=82,
+                deps=deps,
+            )
+        )
+
+    assert checks == [
+        "ci/test (failure)",
+        "lint (pending)",
+        "http://example/check (error)",
+        "unknown (unknown)",
+    ]
 
 
 def test_before_output_process_allows_missing_subject(deps: AgentDeps) -> None:

@@ -29,7 +29,15 @@ class _FSCapability(CapabilityWithTools, ConsoleCapability):
 Call these as `await function_name(...)` inside `run_code`.
 
 Use these functions to read and write files. Do NOT use stdlib file I/O
-(`open()`, `os`, `pathlib`) — only these sandbox functions are available.\
+(`open()`, `os`, `pathlib`) — only these sandbox functions are available.
+
+When shell execution is available, use it for normal local repository work such
+as reading the checkout, creating worktrees, running tests, and invoking local
+`git` commands.
+
+Do NOT use shell commands to call the Gitea HTTP API or to replace available
+`gitea_*` functions for issue, pull request, review, or other server-side
+actions.\
 """
 
 

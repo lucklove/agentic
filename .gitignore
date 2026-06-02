@@ -13,6 +13,7 @@ memories/
 
 # Local git worktrees
 worktrees/
+.worktrees/
 
 # OS
 .DS_Store
