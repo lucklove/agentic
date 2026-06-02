@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from deps import AgentDeps
-from poller import _build_context_message, _handle_notification
+from poller import _build_context_message, _handle_notification, _notification_span_name
 
 
 class FakeResp:
@@ -114,6 +114,13 @@ def test_build_context_message_excludes_shared_rules() -> None:
     assert "if someone @mentions you" not in message
     assert "Do not react to your own comments" not in message
     assert "Read the project's AGENTS.md" not in message
+
+
+def test_notification_span_name_includes_gitea_username() -> None:
+    assert (
+        _notification_span_name("autonomous/agentic", "31", "code_agent")
+        == "notification autonomous/agentic#31 (code_agent)"
+    )
 
 
 def test_handle_notification_leaves_thread_unread_when_agent_fails(

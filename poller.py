@@ -90,6 +90,10 @@ def _mentioned_users(body: str) -> set[str]:
     return {match.group(1) for match in _MENTION_PATTERN.finditer(body)}
 
 
+def _notification_span_name(repo_full_name: str, number: str, gitea_username: str) -> str:
+    return f"notification {repo_full_name}#{number} ({gitea_username})"
+
+
 @dataclass
 class NotificationContext:
     """Gitea notification plus API helpers for its issue/PR subject."""
@@ -246,9 +250,14 @@ async def _handle_notification(
     notif_ctx = NotificationContext(http=http, notif=notif)
 
     with logfire.span(
-        "notification {repo}#{number}",
+        _notification_span_name(
+            notif_ctx.repo_full_name,
+            notif_ctx.number,
+            deps.gitea_username,
+        ),
         repo=notif_ctx.repo_full_name,
         number=notif_ctx.number,
+        gitea_username=deps.gitea_username,
         notification_id=notif_ctx.id,
     ):
         subject = await notif_ctx.get_subject()
