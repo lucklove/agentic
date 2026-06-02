@@ -365,3 +365,36 @@ def test_handle_notification_logs_gitea_username_for_skips(
             assert call.kwargs["gitea_username"] == "code_agent"
 
     asyncio.run(run())
+
+
+def test_handle_notification_checks_open_dependencies_before_relevance(
+    deps: AgentDeps,
+) -> None:
+    async def run() -> None:
+        http = FakeHTTP(subject={
+            "state": "open",
+            "closed_at": None,
+            "user": {"login": "human"},
+            "assignees": [],
+        })
+
+        async def open_dependencies(self) -> list[dict[str, object]]:
+            return [{"state": "open", "number": 99}]
+
+        async def is_subject_relevant_to_agent(
+            self,
+            subject: dict[str, object],
+            gitea_username: str,
+        ) -> bool:
+            raise AssertionError("relevance should not be checked after dependency skip")
+
+        with patch("poller.NotificationContext.open_dependencies", new=open_dependencies):
+            with patch(
+                "poller.NotificationContext.is_subject_relevant_to_agent",
+                new=is_subject_relevant_to_agent,
+            ):
+                await _handle_notification(PassingAgent(), http, notification(), deps)
+
+        assert http.patches == ["/api/v1/notifications/threads/123"]
+
+    asyncio.run(run())

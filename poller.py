@@ -268,6 +268,14 @@ async def _handle_notification(
                 number=notif_ctx.number,
                 gitea_username=deps.gitea_username,
             )
+        elif open_dependencies := await notif_ctx.open_dependencies():
+            logfire.info(
+                "skip notification with open dependencies",
+                repo=notif_ctx.repo_full_name,
+                number=notif_ctx.number,
+                gitea_username=deps.gitea_username,
+                open_dependencies=len(open_dependencies),
+            )
         elif not await notif_ctx.is_subject_relevant_to_agent(
             subject,
             deps.gitea_username,
@@ -277,14 +285,6 @@ async def _handle_notification(
                 repo=notif_ctx.repo_full_name,
                 number=notif_ctx.number,
                 gitea_username=deps.gitea_username,
-            )
-        elif open_dependencies := await notif_ctx.open_dependencies():
-            logfire.info(
-                "skip notification with open dependencies",
-                repo=notif_ctx.repo_full_name,
-                number=notif_ctx.number,
-                gitea_username=deps.gitea_username,
-                open_dependencies=len(open_dependencies),
             )
         else:
             run_deps = replace(

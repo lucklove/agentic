@@ -4,4 +4,4 @@ import logfire
 
 
 def pytest_configure() -> None:
-    logfire.configure(send_to_logfire=False)
+    logfire.configure(send_to_logfire=False, inspect_arguments=False)

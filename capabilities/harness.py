@@ -16,7 +16,7 @@ _HARNESS_INSTRUCTIONS = """\
 ## Harness Rules
 
 - Highest priority:
-  - if the last message in the issue or pull request @mentions you, reply with an @mention back to that person unless the task is completed during this turn; if it is completed, finish by applying the appropriate final state change for the issue or PR instead of posting a separate follow-up reply.
+  - if the last message in the issue or pull request @mentions you, reply with an @mention back to that person by calling `gitea_issue_write`, even when the notification subject is a pull request, unless the task is completed during this turn; if it is completed, finish by applying the appropriate final state change for the issue or PR instead of posting a separate follow-up reply.
   - if the last message in the issue or pull request @mentions someone else, do nothing.
 - Do not react to your own comments, except that you are menthioned in the last message.
 - Read the full relevant issue or pull request context before acting.

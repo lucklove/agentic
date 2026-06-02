@@ -31,6 +31,8 @@ def test_instructions_include_shared_rules() -> None:
     instructions = HarnessCapability().get_instructions()
 
     assert "Harness Rules" in instructions
+    assert "reply with an @mention back to that person by calling `gitea_issue_write`" in instructions
+    assert "even when the notification subject is a pull request" in instructions
     assert "Do not react to your own comments" in instructions
     assert "Read the full relevant issue or pull request context before acting." in instructions
 
