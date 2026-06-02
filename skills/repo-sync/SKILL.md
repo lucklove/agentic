@@ -25,16 +25,39 @@ Run `scripts/sync_github_to_gitea.py` to force-push GitHub `main` to Gitea
 Arguments:
 
 - `--repo-dir`: local clone path; it must already exist and be a Git repository.
-- `--github-url`: GitHub repository URL with token auth, for example
-  `https://<token>@github.com/owner/repo.git`.
-- `--gitea-url`: Gitea repository URL with token auth.
+- `--owner`: Gitea repository owner, for example `autonomous`.
+- `--repo`: repository name, for example `docker-image-controller`.
+- `--profile`: profile name used to read the Gitea token from
+  `profiles/<name>.yaml`; defaults to `ops_agent`.
+- `--github-url`: optional override for the GitHub repository URL. If omitted,
+  the script reads `git remote -v` and uses the GitHub fetch remote, preferring
+  `origin` when multiple GitHub remotes exist.
+- `--gitea-url`: optional override for the Gitea repository URL. If omitted,
+  the script reads `agentic.yaml` for `gitea.base_url`, reads the Gitea token
+  from the selected profile, and builds the target repository URL from
+  `--owner/--repo`.
 - `--main-branch`: main branch name; defaults to `main`.
 - `--dry-run`: print the commands that would be run without changing anything.
 
 Example:
 
 ```shell
-skills/repo-sync/scripts/sync_github_to_gitea.py   --repo-dir /path/to/repo   --github-url https://<token>@github.com/owner/repo.git   --gitea-url https://<token>@gitea.example.com/org/repo.git
+skills/repo-sync/scripts/sync_github_to_gitea.py \
+  --repo-dir /path/to/repo \
+  --owner autonomous \
+  --repo docker-image-controller
+```
+
+Override URLs explicitly when auto-discovery is ambiguous or when using a
+different profile or remote layout:
+
+```shell
+skills/repo-sync/scripts/sync_github_to_gitea.py \
+  --repo-dir /path/to/repo \
+  --owner autonomous \
+  --repo docker-image-controller \
+  --github-url https://<token>@github.com/owner/repo.git \
+  --gitea-url https://<token>@gitea.example.com/org/repo.git
 ```
 
 ## Gitea to GitHub
