@@ -21,7 +21,9 @@ def test_gitea_instructions_include_pr_review_comments_when_unfiltered() -> None
 
 
 def test_gitea_instructions_include_pr_review_comments_when_allowed() -> None:
-    instructions = _capability({"allow": ["gitea_pull_request_read"]}).get_instructions()
+    instructions = _capability(
+        {"allow": ["gitea_pull_request_read"]}
+    ).get_instructions()
 
     assert "gitea_pull_request_read" in instructions
     assert 'method="get_review_comments"' in instructions

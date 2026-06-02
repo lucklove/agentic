@@ -35,7 +35,9 @@ def _subject_path(subject: NotificationSubject) -> str:
 
 
 def _comments_path(subject: NotificationSubject) -> str:
-    return f"/api/v1/repos/{subject.owner}/{subject.repo}/issues/{subject.number}/comments"
+    return (
+        f"/api/v1/repos/{subject.owner}/{subject.repo}/issues/{subject.number}/comments"
+    )
 
 
 def _is_closed(item: dict[str, Any]) -> bool:

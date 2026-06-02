@@ -9,7 +9,8 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from model_factory import build_model
 
 
-def test_build_model_supports_openai_chat() -> None:
+def test_build_model_supports_openai_chat(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     model = build_model("openai-chat:gpt-5.4")
 
     assert isinstance(model, OpenAIChatModel)
@@ -17,7 +18,8 @@ def test_build_model_supports_openai_chat() -> None:
     assert isinstance(model.provider, OpenAIProvider)
 
 
-def test_build_model_supports_openai_responses() -> None:
+def test_build_model_supports_openai_responses(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     model = build_model("openai-responses:gpt-5.4")
 
     assert isinstance(model, OpenAIResponsesModel)
@@ -25,7 +27,8 @@ def test_build_model_supports_openai_responses() -> None:
     assert isinstance(model.provider, OpenAIProvider)
 
 
-def test_build_model_supports_anthropic() -> None:
+def test_build_model_supports_anthropic(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     model = build_model("anthropic:claude-sonnet-4-5")
 
     assert isinstance(model, AnthropicModel)

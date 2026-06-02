@@ -26,12 +26,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from fastmcp.client.transports import StdioTransport
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.mcp import MCPToolset
-from pydantic_ai.toolsets import AgentToolset, FilteredToolset
+from pydantic_ai.toolsets import AbstractToolset, AgentToolset, FilteredToolset
 
 from capabilities.base import make_name_filter
 
@@ -82,7 +82,10 @@ class GiteaMCPCapability(AbstractCapability[Any]):
         if self._filter is None:
             return self._server
         f = self._filter  # capture non-None for the lambda
-        return FilteredToolset(self._server, filter_func=lambda _ctx, tool: f(tool))
+        return FilteredToolset(
+            cast(AbstractToolset[Any], self._server),
+            filter_func=lambda _ctx, tool: f(tool),
+        )
 
 
 def make_gitea_capability(

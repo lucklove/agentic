@@ -118,7 +118,9 @@ async def run_profiles(profile_names: list[str]) -> None:
     )
     for name, result in zip(profile_names, results, strict=True):
         if isinstance(result, BaseException):
-            logfire.error("profile {name} exited with error", name=name, exc_info=result)
+            logfire.error(
+                "profile {name} exited with error", name=name, exc_info=result
+            )
 
 
 async def run_instruction(profile_name: str, instruction: str) -> None:

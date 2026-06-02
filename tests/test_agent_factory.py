@@ -5,7 +5,7 @@ from pydantic_ai.models.openai import OpenAICompaction
 
 from agent_factory import _build_registry
 from capabilities.harness import HarnessCapability
-from config import GlobalConfig, GiteaGlobalConfig, GiteaProfileConfig, ProfileConfig
+from config import GiteaGlobalConfig, GiteaProfileConfig, GlobalConfig, ProfileConfig
 
 
 def _registry() -> dict:

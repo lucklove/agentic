@@ -46,7 +46,9 @@ class GlobalConfig:
     capabilities: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
-def _normalize_capabilities(raw_caps: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+def _normalize_capabilities(
+    raw_caps: dict[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
     """Normalize bare/null capability entries to empty option dicts."""
     return {k: (v or {}) for k, v in (raw_caps or {}).items()}
 

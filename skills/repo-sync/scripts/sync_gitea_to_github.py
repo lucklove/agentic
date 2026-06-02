@@ -43,7 +43,15 @@ def redact_argument(argument: str) -> str:
     parts = urlsplit(argument)
     if parts.scheme in {"http", "https"} and "@" in parts.netloc:
         host = parts.netloc.rsplit("@", 1)[1]
-        return urlunsplit((parts.scheme, f"<redacted>@{host}", parts.path, parts.query, parts.fragment))
+        return urlunsplit(
+            (
+                parts.scheme,
+                f"<redacted>@{host}",
+                parts.path,
+                parts.query,
+                parts.fragment,
+            )
+        )
     return argument
 
 
@@ -74,7 +82,9 @@ def subprocess_run(
         sys.stdout.write(redact_text(result.stdout))
         sys.stderr.write(redact_text(result.stderr))
     if check and result.returncode != 0:
-        raise SystemExit(f"command failed with exit code {result.returncode}: {format_command(command)}")
+        raise SystemExit(
+            f"command failed with exit code {result.returncode}: {format_command(command)}"
+        )
     return result
 
 
@@ -96,7 +106,9 @@ def capture(command: list[str], *, check: bool = True) -> str:
     return result.stdout
 
 
-def git(repo_dir: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+def git(
+    repo_dir: Path, *args: str, check: bool = True
+) -> subprocess.CompletedProcess[str]:
     return subprocess_run(["git", "-C", str(repo_dir), *args], check=check)
 
 
@@ -208,7 +220,9 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def create_sync_pr(repo_dir: Path, sha: str, title: str, body: str, args: argparse.Namespace) -> str:
+def create_sync_pr(
+    repo_dir: Path, sha: str, title: str, body: str, args: argparse.Namespace
+) -> str:
     branch = f"sync/{slugify(title)}"
     current_branch = git_capture(repo_dir, "branch", "--show-current").strip()
     if current_branch == args.main_branch:
@@ -229,7 +243,11 @@ def create_sync_pr(repo_dir: Path, sha: str, title: str, body: str, args: argpar
         print(f"dry-run: would commit {sha} as {title!r}")
         git(repo_dir, "reset", "--hard", "HEAD")
 
-    push = run(["git", "-C", str(repo_dir), "push", "_github", branch], check=False, dry_run=args.dry_run)
+    push = run(
+        ["git", "-C", str(repo_dir), "push", "_github", branch],
+        check=False,
+        dry_run=args.dry_run,
+    )
     if push is not None and push.returncode != 0:
         print(f"warning: skipped PR for {sha} ({title}) because push failed")
         return "skipped"
@@ -262,7 +280,9 @@ def sync(args: argparse.Namespace) -> None:
     ensure_clean_worktree(args.repo_dir)
     add_remote(args.repo_dir, "_github", args.github_url)
     add_remote(args.repo_dir, "_gitea", args.gitea_url)
-    original_head = git_capture(args.repo_dir, "rev-parse", "--abbrev-ref", "HEAD").strip()
+    original_head = git_capture(
+        args.repo_dir, "rev-parse", "--abbrev-ref", "HEAD"
+    ).strip()
     if original_head == "HEAD":
         original_head = git_capture(args.repo_dir, "rev-parse", "HEAD").strip()
     synced = 0
@@ -308,7 +328,13 @@ def sync(args: argparse.Namespace) -> None:
             else:
                 skipped += 1
             git(args.repo_dir, "checkout", args.main_branch, check=False)
-            git(args.repo_dir, "branch", "-D", f"sync/{slugify(rewritten_title)}", check=False)
+            git(
+                args.repo_dir,
+                "branch",
+                "-D",
+                f"sync/{slugify(rewritten_title)}",
+                check=False,
+            )
     finally:
         git(args.repo_dir, "checkout", original_head, check=False)
         remove_remote(args.repo_dir, "_github")

@@ -16,9 +16,10 @@ from urllib.parse import urlsplit, urlunsplit
 
 import yaml
 
-
 CREDENTIAL_URL_RE = re.compile(r"(https?://)[^\s/@]+@")
-REMOTE_LINE_RE = re.compile(r"^(?P<name>\S+)\s+(?P<url>\S+)\s+\((?P<kind>fetch|push)\)$")
+REMOTE_LINE_RE = re.compile(
+    r"^(?P<name>\S+)\s+(?P<url>\S+)\s+\((?P<kind>fetch|push)\)$"
+)
 SSH_GITHUB_REMOTE_RE = re.compile(r"^[^@\s]+@github\.com:")
 ROOT_DIR = Path(__file__).resolve().parents[3]
 DEFAULT_GLOBAL_CONFIG = ROOT_DIR / "agentic.yaml"
@@ -29,7 +30,15 @@ def redact_argument(argument: str) -> str:
     parts = urlsplit(argument)
     if parts.scheme in {"http", "https"} and "@" in parts.netloc:
         host = parts.netloc.rsplit("@", 1)[1]
-        return urlunsplit((parts.scheme, f"<redacted>@{host}", parts.path, parts.query, parts.fragment))
+        return urlunsplit(
+            (
+                parts.scheme,
+                f"<redacted>@{host}",
+                parts.path,
+                parts.query,
+                parts.fragment,
+            )
+        )
     return argument
 
 
@@ -41,7 +50,9 @@ def format_command(command: list[str]) -> str:
     return " ".join(redact_argument(argument) for argument in command)
 
 
-def run(command: list[str], *, dry_run: bool = False) -> subprocess.CompletedProcess[str] | None:
+def run(
+    command: list[str], *, dry_run: bool = False
+) -> subprocess.CompletedProcess[str] | None:
     redacted_command = format_command(command)
     print("$ " + redacted_command)
     if dry_run:
@@ -56,7 +67,9 @@ def run(command: list[str], *, dry_run: bool = False) -> subprocess.CompletedPro
     sys.stdout.write(redact_text(result.stdout))
     sys.stderr.write(redact_text(result.stderr))
     if result.returncode != 0:
-        raise SystemExit(f"command failed with exit code {result.returncode}: {redacted_command}")
+        raise SystemExit(
+            f"command failed with exit code {result.returncode}: {redacted_command}"
+        )
     return result
 
 
@@ -72,7 +85,9 @@ def capture(command: list[str]) -> str:
     )
     sys.stderr.write(redact_text(result.stderr))
     if result.returncode != 0:
-        raise SystemExit(f"command failed with exit code {result.returncode}: {redacted_command}")
+        raise SystemExit(
+            f"command failed with exit code {result.returncode}: {redacted_command}"
+        )
     return result.stdout
 
 
@@ -99,7 +114,9 @@ def git_remote_lines(repo_dir: Path) -> list[tuple[str, str, str]]:
     for line in output.splitlines():
         match = REMOTE_LINE_RE.match(line.strip())
         if match:
-            remotes.append((match.group("name"), match.group("url"), match.group("kind")))
+            remotes.append(
+                (match.group("name"), match.group("url"), match.group("kind"))
+            )
     return remotes
 
 
@@ -133,7 +150,9 @@ def discover_github_url(repo_dir: Path) -> str:
     )
 
 
-def profile_token(profile_name: str, *, profiles_dir: Path = DEFAULT_PROFILES_DIR) -> str:
+def profile_token(
+    profile_name: str, *, profiles_dir: Path = DEFAULT_PROFILES_DIR
+) -> str:
     profile_path = profiles_dir / f"{profile_name}.yaml"
     data = load_yaml(profile_path)
     gitea = data.get("gitea")
@@ -167,7 +186,9 @@ def discover_gitea_url(
     global_config = load_yaml(global_config_path)
     gitea = global_config.get("gitea")
     if not isinstance(gitea, dict) or not isinstance(gitea.get("base_url"), str):
-        raise SystemExit(f"missing gitea.base_url in global config: {global_config_path}")
+        raise SystemExit(
+            f"missing gitea.base_url in global config: {global_config_path}"
+        )
     token = profile_token(profile_name, profiles_dir=profiles_dir)
     return build_gitea_url(gitea["base_url"], token, owner, repo)
 

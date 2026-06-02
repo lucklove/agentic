@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-
 SCRIPT_PATH = (
     Path(__file__).resolve().parents[1]
     / "skills"
@@ -30,13 +29,23 @@ def test_build_gitea_url_uses_token_owner_and_repo() -> None:
     assert url == "http://secret-token@gitea.ai/autonomous/docker-image-controller.git"
 
 
-def test_discover_github_url_prefers_origin_when_multiple(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_discover_github_url_prefers_origin_when_multiple(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         MODULE,
         "git_remote_lines",
         lambda repo_dir: [
-            ("upstream", "git@github.com:tidbcloud/docker-image-controller.git", "fetch"),
-            ("origin", "https://github.com/tidbcloud/docker-image-controller.git", "fetch"),
+            (
+                "upstream",
+                "git@github.com:tidbcloud/docker-image-controller.git",
+                "fetch",
+            ),
+            (
+                "origin",
+                "https://github.com/tidbcloud/docker-image-controller.git",
+                "fetch",
+            ),
         ],
     )
 
@@ -52,7 +61,11 @@ def test_discover_github_url_requires_explicit_url_when_ambiguous(
         MODULE,
         "git_remote_lines",
         lambda repo_dir: [
-            ("upstream", "git@github.com:tidbcloud/docker-image-controller.git", "fetch"),
+            (
+                "upstream",
+                "git@github.com:tidbcloud/docker-image-controller.git",
+                "fetch",
+            ),
             ("mirror", "https://github.com/acme/docker-image-controller.git", "fetch"),
         ],
     )
@@ -61,11 +74,19 @@ def test_discover_github_url_requires_explicit_url_when_ambiguous(
         MODULE.discover_github_url(Path("/tmp/repo"))
 
 
-def test_discover_github_url_requires_github_remote(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_discover_github_url_requires_github_remote(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         MODULE,
         "git_remote_lines",
-        lambda repo_dir: [("origin", "https://gitea.ai/autonomous/docker-image-controller.git", "fetch")],
+        lambda repo_dir: [
+            (
+                "origin",
+                "https://gitea.ai/autonomous/docker-image-controller.git",
+                "fetch",
+            )
+        ],
     )
 
     with pytest.raises(SystemExit, match="could not find a GitHub fetch remote"):
@@ -74,20 +95,16 @@ def test_discover_github_url_requires_github_remote(monkeypatch: pytest.MonkeyPa
 
 def test_discover_gitea_url_reads_configs(tmp_path: Path) -> None:
     global_config = tmp_path / "agentic.yaml"
-    global_config.write_text(
-        """
+    global_config.write_text("""
 gitea:
   base_url: http://gitea.ai
-"""
-    )
+""")
     profiles_dir = tmp_path / "profiles"
     profiles_dir.mkdir()
-    (profiles_dir / "ops_agent.yaml").write_text(
-        """
+    (profiles_dir / "ops_agent.yaml").write_text("""
 gitea:
   token: top-secret
-"""
-    )
+""")
 
     url = MODULE.discover_gitea_url(
         "autonomous",

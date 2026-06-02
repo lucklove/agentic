@@ -15,8 +15,8 @@ Errors are not caught here; they propagate to the caller and exit the process.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, replace
 import re
+from dataclasses import dataclass, replace
 from string import Template
 from typing import Any
 
@@ -90,7 +90,9 @@ def _mentioned_users(body: str) -> set[str]:
     return {match.group(1) for match in _MENTION_PATTERN.finditer(body)}
 
 
-def _notification_span_name(repo_full_name: str, number: str, gitea_username: str) -> str:
+def _notification_span_name(
+    repo_full_name: str, number: str, gitea_username: str
+) -> str:
     return f"notification {repo_full_name}#{number} ({gitea_username})"
 
 
@@ -320,7 +322,9 @@ async def poll_once(
     relevant = (n for n in notifications if n["subject"]["type"] in _SUBJECT_TYPES)
 
     for notif in relevant:
-        await _handle_notification(agent, http, notif, deps, request_limit=request_limit)
+        await _handle_notification(
+            agent, http, notif, deps, request_limit=request_limit
+        )
 
 
 async def poll_forever(
