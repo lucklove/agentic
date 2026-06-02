@@ -65,7 +65,7 @@ def _build_retrying_http_client() -> httpx.AsyncClient:
                 fallback_strategy=wait_exponential(multiplier=1, max=30),
                 max_wait=120,
             ),
-            stop=stop_after_attempt(5),
+            stop=stop_after_attempt(100),
             reraise=True,
         ),
         validate_response=_validate_retryable_response,
