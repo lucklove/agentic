@@ -31,10 +31,19 @@ def test_instructions_include_shared_rules() -> None:
     instructions = HarnessCapability().get_instructions()
 
     assert "Harness Rules" in instructions
-    assert "reply with an @mention back to that person by calling `gitea_issue_write`" in instructions
+    assert "reply in the thread by calling `gitea_issue_write`" in instructions
     assert "even when the notification subject is a pull request" in instructions
     assert "Do not react to your own comments" in instructions
     assert "Read the full relevant issue or pull request context before acting." in instructions
+    assert "gitea_pull_request_write" in instructions
+    assert '`method: "merge"`' in instructions
+    assert '`merge_style: "squash"`' in instructions
+    assert "`delete_branch: true`" in instructions
+    assert "not associated with an open PR" in instructions
+    assert "choose exactly one of these actions" in instructions
+    assert "apply that final state change now and do not post any reply" in instructions
+    assert "reply in the thread by calling `gitea_issue_write` and @mention the requester whether the task succeeded or failed" in instructions
+    assert "post a helpful comment with relevant information by calling `gitea_issue_write` and do not @mention anyone" in instructions
 
 
 def test_before_output_process_allows_missing_subject(deps: AgentDeps) -> None:
@@ -68,6 +77,29 @@ def test_before_output_process_allows_partial_output(deps: AgentDeps) -> None:
     assert output == "done"
 
 
+def test_before_output_process_allows_when_subject_already_closed(
+    deps: AgentDeps,
+) -> None:
+    cap = HarnessCapability()
+    ctx = SimpleNamespace(deps=deps, partial_output=False)
+
+    with patch.object(
+        cap,
+        "_is_subject_closed",
+        AsyncMock(return_value=True),
+    ), patch.object(
+        cap,
+        "_get_last_comment",
+        AsyncMock(),
+    ) as get_last_comment:
+        output = asyncio.run(
+            cap.before_output_process(ctx, output_context=object(), output="done")
+        )
+
+    assert output == "done"
+    get_last_comment.assert_not_awaited()
+
+
 def test_before_output_process_allows_when_last_comment_does_not_mention_agent(
     deps: AgentDeps,
 ) -> None:
@@ -75,6 +107,10 @@ def test_before_output_process_allows_when_last_comment_does_not_mention_agent(
     ctx = SimpleNamespace(deps=deps, partial_output=False)
 
     with patch.object(
+        cap,
+        "_is_subject_closed",
+        AsyncMock(return_value=False),
+    ), patch.object(
         cap,
         "_get_last_comment",
         AsyncMock(return_value={"body": "No mention here"}),
@@ -94,10 +130,17 @@ def test_before_output_process_raises_when_last_comment_mentions_agent(
 
     with patch.object(
         cap,
+        "_is_subject_closed",
+        AsyncMock(return_value=False),
+    ), patch.object(
+        cap,
         "_get_last_comment",
         AsyncMock(return_value={"body": "Please check this @code_agent"}),
     ):
-        with pytest.raises(ModelRetry, match="mentions @code_agent"):
+        with pytest.raises(
+            ModelRetry,
+            match="choose exactly one of these actions",
+        ):
             asyncio.run(
                 cap.before_output_process(ctx, output_context=object(), output="done")
             )
