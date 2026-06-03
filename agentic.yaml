@@ -1,5 +1,6 @@
 # Global configuration shared across all profiles.
-# Profile-specific settings (token, model, instructions, …) live in profiles/<name>.yaml.
+# Profile-specific settings (token, model, instructions, …) live in
+# ~/.agentic/<profile-name>/profile.yaml.
 
 gitea:
   base_url: "http://gitea.ai"

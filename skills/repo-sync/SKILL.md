@@ -28,7 +28,7 @@ Arguments:
 - `--owner`: Gitea repository owner, for example `autonomous`.
 - `--repo`: repository name, for example `docker-image-controller`.
 - `--profile`: profile name used to read the Gitea token from
-  `profiles/<name>.yaml`; defaults to `ops_agent`.
+  `~/.agentic/<name>/profile.yaml`; defaults to `ops_agent`.
 - `--github-url`: optional override for the GitHub repository URL. If omitted,
   the script reads `git remote -v` and uses the GitHub fetch remote, preferring
   `origin` when multiple GitHub remotes exist.

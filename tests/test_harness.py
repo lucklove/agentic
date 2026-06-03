@@ -307,3 +307,132 @@ def test_before_output_process_raises_when_last_comment_mentions_agent(
             asyncio.run(
                 cap.before_output_process(ctx, output_context=object(), output="done")
             )
+
+
+def test_before_output_process_allows_conversation_comment_with_marker(
+    deps: AgentDeps,
+) -> None:
+    cap = HarnessCapability()
+    ctx = SimpleNamespace(deps=deps, partial_output=False)
+    marker_body = "<!-- agentic:@code_agent -->\n\nI fixed the bug."
+
+    with patch.object(
+        cap,
+        "_is_subject_closed",
+        AsyncMock(return_value=False),
+    ), patch.object(
+        cap,
+        "_get_last_comment",
+        AsyncMock(return_value={"body": marker_body}),
+    ):
+        output = asyncio.run(
+            cap.before_output_process(ctx, output_context=object(), output="done")
+        )
+
+    assert output == "done"
+
+
+def test_after_tool_execute_filters_conversation_comments() -> None:
+    cap = HarnessCapability()
+    ctx = SimpleNamespace(
+        deps=AgentDeps(
+            backend=object(),
+            gitea_username="code_agent",
+            gitea_base_url="http://gitea.example",
+            gitea_token="token",
+        )
+    )
+    tool_def = SimpleNamespace(name="gitea_issue_read")
+    args = {"method": "get_comments"}
+    result = [
+        {"body": "Regular comment", "user": {"login": "human"}},
+        {
+            "body": "<!-- agentic:@code_agent -->\n\nDone.",
+            "user": {"login": "code_agent"},
+        },
+        {"body": "Another comment", "user": {"login": "other"}},
+    ]
+
+    filtered = asyncio.run(
+        cap.after_tool_execute(
+            ctx, call=SimpleNamespace(), tool_def=tool_def, args=args, result=result
+        )
+    )
+
+    assert len(filtered) == 2
+    assert filtered[0]["body"] == "Regular comment"
+    assert filtered[1]["body"] == "Another comment"
+
+
+def test_after_tool_execute_passes_through_non_list_result() -> None:
+    cap = HarnessCapability()
+    ctx = SimpleNamespace(
+        deps=AgentDeps(
+            backend=object(),
+            gitea_username="code_agent",
+            gitea_base_url="http://gitea.example",
+            gitea_token="token",
+        )
+    )
+    tool_def = SimpleNamespace(name="gitea_issue_read")
+    args = {"method": "get"}
+    result = {"body": "issue body", "title": "test"}
+
+    output = asyncio.run(
+        cap.after_tool_execute(
+            ctx, call=SimpleNamespace(), tool_def=tool_def, args=args, result=result
+        )
+    )
+
+    assert output == result
+
+
+def test_after_tool_execute_passes_through_non_comment_method() -> None:
+    cap = HarnessCapability()
+    ctx = SimpleNamespace(
+        deps=AgentDeps(
+            backend=object(),
+            gitea_username="code_agent",
+            gitea_base_url="http://gitea.example",
+            gitea_token="token",
+        )
+    )
+    tool_def = SimpleNamespace(name="gitea_issue_read")
+    args = {"method": "get_labels"}
+    result = [{"name": "bug"}]
+
+    output = asyncio.run(
+        cap.after_tool_execute(
+            ctx, call=SimpleNamespace(), tool_def=tool_def, args=args, result=result
+        )
+    )
+
+    assert output == result
+
+
+def test_after_tool_execute_preserves_different_agent_marker() -> None:
+    cap = HarnessCapability()
+    ctx = SimpleNamespace(
+        deps=AgentDeps(
+            backend=object(),
+            gitea_username="code_agent",
+            gitea_base_url="http://gitea.example",
+            gitea_token="token",
+        )
+    )
+    tool_def = SimpleNamespace(name="gitea_issue_read")
+    args = {"method": "get_comments"}
+    result = [
+        {
+            "body": "<!-- agentic:@review_agent -->\n\nLGTM",
+            "user": {"login": "review_agent"},
+        },
+    ]
+
+    filtered = asyncio.run(
+        cap.after_tool_execute(
+            ctx, call=SimpleNamespace(), tool_def=tool_def, args=args, result=result
+        )
+    )
+
+    assert len(filtered) == 1

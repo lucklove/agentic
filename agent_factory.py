@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from string import Template
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 from pydantic_ai import Agent, AgentRetries
 from pydantic_ai.capabilities import AbstractCapability
@@ -42,10 +42,23 @@ __all__ = ["make_agent"]
 # Type alias for a capability factory function.
 _CapabilityFactory = Callable[[dict[str, Any]], AbstractCapability]
 
+_AGENTIC_DIR = Path.home() / ".agentic"
 
-def _make_skills_capability(skills_dir: str, opts: dict[str, Any]) -> SkillsCapability:
-    """Discover skills from *skills_dir*, apply allow/deny filter, return capability."""
-    all_skills = discover_skills(skills_dir)
+
+def _make_skills_capability(
+    skills_dirs: Sequence[str],
+    opts: dict[str, Any],
+) -> SkillsCapability:
+    """Discover skills from *skills_dirs*, merge by name, apply filters."""
+    all_skills: list[Any] = []
+    seen_names: set[str] = set()
+    for skills_dir in skills_dirs:
+        for skill in discover_skills(skills_dir):
+            if skill.name in seen_names:
+                continue
+            seen_names.add(skill.name)
+            all_skills.append(skill)
+
     name_filter = make_name_filter(opts)
     filtered = [s for s in all_skills if name_filter(s)] if name_filter else all_skills
     return SkillsCapability(skills=filtered)
@@ -54,6 +67,9 @@ def _make_skills_capability(skills_dir: str, opts: dict[str, Any]) -> SkillsCapa
 def _build_registry(
     global_cfg: GlobalConfig,
     profile: ProfileConfig,
+    *,
+    profile_name: str = "",
+    profile_skills_dirs: Sequence[Path] = (),
 ) -> dict[str, _CapabilityFactory]:
     """Return the capability-name → factory map for this profile.
 
@@ -61,7 +77,16 @@ def _build_registry(
     fresh registry that safely closes over ``global_cfg`` and ``profile``
     without sharing state between profiles.
     """
-    skills_dir = str(Path(global_cfg.skills_dir).resolve())
+    skills_dirs = [str(path.resolve()) for path in profile_skills_dirs]
+    global_skills_dir = str(Path(global_cfg.skills_dir).resolve())
+    if global_skills_dir not in skills_dirs:
+        skills_dirs.append(global_skills_dir)
+
+    memory_path = str(
+        (_AGENTIC_DIR / profile_name / "memory.json")
+        if profile_name
+        else ".memories.json"
+    )
 
     return {
         "code_exec": lambda opts: CodeMode(),
@@ -74,10 +99,10 @@ def _build_registry(
         "filesystem": lambda opts: make_fs_capability(
             include_execute=opts.get("include_execute", False),
         ),
-        "skills": lambda opts: _make_skills_capability(skills_dir, opts),
+        "skills": lambda opts: _make_skills_capability(skills_dirs, opts),
         "memory": lambda opts: Memory.from_spec(
-            backend=opts.get("backend", "memory"),
-            path=opts.get("path", ".memories.json"),
+            backend=opts.get("backend", "file"),
+            path=opts.get("path", memory_path),
             inject_memories_in_instructions=opts.get(
                 "inject_memories_in_instructions", True
             ),
@@ -94,6 +119,8 @@ def make_agent(
     profile: ProfileConfig,
     global_cfg: GlobalConfig,
     deps: AgentDeps,
+    *,
+    profile_skills_dirs: Sequence[Path] = (),
 ) -> Agent[AgentDeps, str]:
     """Build and return an Agent configured from *profile*.
 
@@ -102,8 +129,14 @@ def make_agent(
         global_cfg:     Global config (Gitea base URL, MCP command, skills dir).
         deps:           Shared runtime deps. ``gitea_username`` is substituted
                         into instructions as ``$gitea_username``.
+        profile_skills_dirs: Optional ordered per-profile skills directories.
     """
-    registry = _build_registry(global_cfg, profile)
+    registry = _build_registry(
+        global_cfg,
+        profile,
+        profile_name=deps.profile_name,
+        profile_skills_dirs=profile_skills_dirs,
+    )
 
     # Merge global defaults with profile overrides; profile entries win on name collision.
     effective_capabilities = global_cfg.capabilities | profile.capabilities

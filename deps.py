@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from pydantic_ai_backends import LocalBackend
 
@@ -26,3 +27,5 @@ class AgentDeps:
     gitea_base_url: str
     gitea_token: str
     notification_subject: NotificationSubject | None = None
+    profile_name: str = ""
+    messages_dir: Path | None = None

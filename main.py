@@ -18,10 +18,11 @@ Usage:
     uv run main.py <profile-name> --instruction "..."
 
 Loads ``agentic.yaml`` (global config) and profile files from
-``profiles/<profile-name>.yaml``. With no profile names, every
-``profiles/*.yaml`` file is loaded. By default, each profile starts its own
-notification polling loop. With ``--instruction``, a single profile runs once
-with that instruction and prints the model output.
+``~/.agentic/<profile-name>/profile.yaml``. With no profile names, every
+discoverable profile is loaded.
+By default, each profile starts its own notification polling loop.  With
+``--instruction``, a single profile runs once with that instruction and prints
+the model output.
 """
 
 from __future__ import annotations
@@ -42,6 +43,7 @@ from deps import AgentDeps
 from poller import poll_forever
 
 _HERE = Path(__file__).parent
+_AGENTIC_DIR = Path.home() / ".agentic"
 
 
 async def _resolve_username(base_url: str, token: str) -> str:
@@ -69,22 +71,53 @@ def _resolve_path(path: str) -> Path:
     return resolved.resolve()
 
 
+def _profile_path(profile_name: str) -> Path:
+    """Return the YAML path for *profile_name*."""
+    return _AGENTIC_DIR / profile_name / "profile.yaml"
+
+
+def _profile_dir(profile_name: str) -> Path:
+    """Return the data directory for *profile_name*."""
+    return _AGENTIC_DIR / profile_name
+
+
 def _discover_profiles() -> list[str]:
-    return sorted(path.stem for path in (_HERE / "profiles").glob("*.yaml"))
+    """Discover profile names from ``~/.agentic/*/profile.yaml``."""
+    if not _AGENTIC_DIR.is_dir():
+        return []
+    return sorted(
+        d.name for d in _AGENTIC_DIR.iterdir() if (d / "profile.yaml").is_file()
+    )
 
 
 async def _build_runtime(profile_name: str) -> AgentRuntime:
     global_cfg = load_global_config(_HERE / "agentic.yaml")
-    profile = load_profile(_HERE / "profiles" / f"{profile_name}.yaml")
+    profile = load_profile(_profile_path(profile_name))
     username = await _resolve_username(global_cfg.gitea.base_url, profile.gitea.token)
     working_dir = _resolve_path(profile.working_dir or global_cfg.working_dir)
+
+    profile_dir = _profile_dir(profile_name)
+    messages_dir = profile_dir / "messages"
+
+    profile_skills_dirs: list[Path] = []
+    skills_subdir = profile_dir / "skills"
+    if skills_subdir.is_dir():
+        profile_skills_dirs.append(skills_subdir)
+
     deps = AgentDeps(
         backend=LocalBackend(working_dir),
         gitea_username=username,
         gitea_base_url=global_cfg.gitea.base_url,
         gitea_token=profile.gitea.token,
+        profile_name=profile_name,
+        messages_dir=messages_dir,
     )
-    agent = make_agent(profile, global_cfg, deps)
+    agent = make_agent(
+        profile,
+        global_cfg,
+        deps,
+        profile_skills_dirs=profile_skills_dirs,
+    )
     return AgentRuntime(
         profile=profile,
         deps=deps,
@@ -145,7 +178,7 @@ if __name__ == "__main__":
         "profiles",
         metavar="profile-name",
         nargs="*",
-        help="Profile name(s) to load; omitted means every profiles/*.yaml file",
+        help="Profile name(s) to load; omitted means every ~/.agentic/*/profile.yaml",
     )
     parser.add_argument(
         "--instruction",
@@ -157,7 +190,7 @@ if __name__ == "__main__":
     profile_names = args.profiles or _discover_profiles()
 
     if not profile_names:
-        parser.error("no profiles found in profiles/*.yaml")
+        parser.error("no profiles found in ~/.agentic/*/profile.yaml")
 
     if args.instruction and len(profile_names) != 1:
         parser.error("--instruction requires exactly one profile")

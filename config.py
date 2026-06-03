@@ -3,7 +3,7 @@
 Two config layers:
 
   GlobalConfig   — loaded from ``agentic.yaml`` (shared across all profiles)
-  ProfileConfig  — loaded from ``profiles/<name>.yaml`` (per-agent settings)
+  ProfileConfig  — loaded from ``~/.agentic/<name>/profile.yaml`` (per-agent settings)
 """
 
 from __future__ import annotations

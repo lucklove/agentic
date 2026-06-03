@@ -11,6 +11,7 @@ from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.tools import RunContext
 
+from conversation import is_conversation_comment, visible_comments
 from deps import AgentDeps, NotificationSubject
 
 _HARNESS_INSTRUCTIONS = """## Harness Rules
@@ -33,6 +34,18 @@ _HARNESS_INSTRUCTIONS = """## Harness Rules
 - If the work is complete and the subject is an issue that is not associated with an open PR, and you judge the issue is resolved, close the issue directly.
 - If no action is required, explain why.
 """
+
+# Gitea MCP tool + method combinations that return issue/PR comments.
+# The harness filters conversation-type markers from these results so the
+# agent does not re-ingest Web UI dialogue through the tool layer.
+_COMMENT_TOOL_METHODS = frozenset(
+    {
+        "get_comments",
+        "list_issue_comments",
+        "get_issue_comments",
+        "list_comments",
+    }
+)
 
 
 def _subject_path(subject: NotificationSubject) -> str:
@@ -112,6 +125,13 @@ class HarnessCapability(AbstractCapability[AgentDeps]):
         if not last_comment:
             return output
 
+        # Conversation-type comments are handled by the poller's direct-input
+        # path.  Do not trigger the @mention retry for them.
+        if is_conversation_comment(
+            last_comment.get("body", ""), ctx.deps.gitea_username
+        ):
+            return output
+
         mention = f"@{ctx.deps.gitea_username}"
         if mention not in last_comment.get("body", ""):
             return output
@@ -128,6 +148,26 @@ class HarnessCapability(AbstractCapability[AgentDeps]):
             "asking for action, post a helpful comment with relevant information "
             "and do not @mention anyone."
         )
+
+    async def after_tool_execute(
+        self,
+        ctx: RunContext[AgentDeps],
+        *,
+        call: ToolCallPart,
+        tool_def: Any,
+        args: dict[str, Any],
+        result: Any,
+    ) -> Any:
+        """Filter conversation-type comments from Gitea comment reads."""
+        if not isinstance(result, list):
+            return result
+        method = args.get("method")
+        if method not in _COMMENT_TOOL_METHODS:
+            return result
+        agent_name = ctx.deps.gitea_username
+        if not agent_name:
+            return result
+        return visible_comments(result, agent_name)
 
     async def _is_subject_closed(
         self,

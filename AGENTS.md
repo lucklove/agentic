@@ -1,11 +1,11 @@
 # agentic
 
-Gitea-notification-driven agent runner. Each profile in `profiles/*.yaml` becomes an independent agent with its own token, model, instructions, capabilities, and polling interval.
+Gitea-notification-driven agent runner. Each profile in `~/.agentic/<profile>/profile.yaml` becomes an independent agent with its own token, model, instructions, capabilities, and polling interval.
 
 ## Commands
 
 ```bash
-uv run main.py                                        # poll every profiles/*.yaml file
+uv run main.py                                        # poll every ~/.agentic/*/profile.yaml
 uv run main.py <profile-name> [<profile-name> ...]  # poll one or more profiles concurrently
 uv run main.py <profile-name> -i "instruction"      # run once, print model output, do not poll
 uv run main.py --help                               # verify CLI shape after entrypoint edits
@@ -28,17 +28,59 @@ Notification threads are marked read in `poller._handle_notification` only after
 
 ## Configuration
 
-`agentic.yaml` is global Gitea/MCP/skills config. `profiles/<name>.yaml` is per-agent config. Real `profiles/*.yaml` files are gitignored because they contain tokens; keep shared examples in `profiles/example.yaml.template`.
+`agentic.yaml` is global Gitea/MCP/skills config. Profile files are discovered from `~/.agentic/<profile-name>/profile.yaml`. Keep shared examples in `profiles/example.yaml.template`.
 
-`working_dir` controls the `LocalBackend` cwd used by command/code execution. It defaults to `.` in `agentic.yaml` (the `main.py` directory), and can be overridden per profile with `working_dir` in `profiles/<name>.yaml`. Relative paths are resolved from the `main.py` directory.
+`working_dir` controls the `LocalBackend` cwd used by command/code execution. It defaults to `.` in `agentic.yaml` (the `main.py` directory), and can be overridden per profile with `working_dir` in `~/.agentic/<profile-name>/profile.yaml`. Relative paths are resolved from the `main.py` directory.
 
 Profile `model` values use explicit `<kind>:<name>` strings. Supported kinds are currently `openai-chat`, `openai-responses`, and `anthropic`.
 
-With no profile arguments, `main.py` scans only `profiles/*.yaml`, sorted by filename stem. The example template is excluded because `profiles/example.yaml.template` has the `.template` extension, not `.yaml`.
+With no profile arguments, `main.py` scans `~/.agentic/*/profile.yaml`. The example template is excluded because `profiles/example.yaml.template` lives in the repository and is not part of discovery.
 
 Profile instruction templating uses `string.Template.safe_substitute`; use `$gitea_username` for substitution. Brace form `{gitea_username}` was documented previously but is not substituted by current code, so existing profiles using it should be updated.
 
 The Gitea MCP command from `agentic.yaml` receives `GITEA_HOST`, `GITEA_ACCESS_TOKEN`, `GOPRIVATE`, `GONOSUMDB`, and `GOINSECURE` per profile in `capabilities/gitea.py`.
+
+## Data Directory Structure
+
+Per-profile data lives under `~/.agentic/<profile-name>/`:
+
+```
+~/.agentic/<profile-name>/
+    profile.yaml          # agent config (model, token, instructions, capabilities)
+    memory.json           # persistent memory store (fixed path, not configurable)
+    messages/<md5>.pkl    # per-issue/PR message history for conversation continuity
+    skills/               # optional per-profile skills directory
+```
+
+The `memory` capability defaults to `backend: file` with path `~/.agentic/<profile-name>/memory.json`. The `messages/` directory is managed by the poller for message history persistence.
+
+## Conversation via Web UI Comments
+
+Issue/PR comments serve as the Web UI conversation channel between humans and agents.
+
+### Comment Marker Convention
+
+Agent comments on issue/PR threads start with a hidden HTML marker:
+
+```
+<!-- agentic:@<agent-name> -->
+```
+
+Both agent-authored and human-authored comments that contain the marker are treated as "conversation-type comments".
+
+### How It Works
+
+1. **Poller wakeup**: The poller reads raw comments. If the last comment contains the current agent's marker, the comment body is passed directly as `agent.run()` input (marker is preserved as-is). Otherwise, the poller falls back to the notification context prompt.
+
+   Relevance checks treat a trailing agent-authored self-marker comment such as `<!-- agentic:@review_agent -->` as conversation metadata rather than a normal comment. That comment is skipped when choosing the last comment for `@mention`-based relevance, so another agent's marker does not make an assigned/review-requested agent look unrelated.
+
+2. **Message history**: Each issue/PR has a persisted message history (`messages/<md5>.pkl`). History is loaded before `agent.run(message_history=...)` and saved after the run completes.
+
+3. **Auto-post**: After every successful `agent.run()`, the agent output is posted as a comment with the conversation marker prepended.
+
+4. **Tool-layer filtering**: When the agent reads comments via `gitea_*` tools, conversation-type comments (those containing the agent's marker) are automatically filtered out by `HarnessCapability.after_tool_execute`. This prevents the same dialogue from entering the context twice — once via message history and once via tool reads.
+
+5. **Harness consistency**: `HarnessCapability.before_output_process` skips the `@mention` retry logic for conversation-type comments, since these are handled by the poller's direct-input path.
 
 ## Capabilities
 

@@ -1,5 +1,5 @@
 # Profile: example
-# Copy to profiles/example.yaml and fill in your token.
+# Copy to ~/.agentic/example/profile.yaml and fill in your token.
 # Start with: uv run main.py example
 
 # Supported model prefixes include:
@@ -16,10 +16,10 @@ gitea:
 # working_dir: "."
 
 instructions: |
-  You are a helpful agent on Gitea. Your username is {gitea_username}.
+  You are a helpful agent on Gitea. Your username is $gitea_username.
 
   Rules:
-  - Never react to your own comments (those authored by {gitea_username}).
+  - Never react to your own comments (those authored by $gitea_username).
   - Read the full issue or PR context (body + all comments) before deciding.
   - If you cannot proceed without human input, post a comment and @mention
     the relevant person using their Gitea username.
@@ -46,7 +46,8 @@ capabilities:
     #   - noisy-skill
   # memory:
   #   backend: file        # "memory" (default, ephemeral) or "file" (on-disk JSON)
-  #   path: .memories.json # only used when backend: file
+  #   # When backend: file, the path defaults to ~/.agentic/<profile>/memory.json.
+  #   # You can override it with a custom path here.
   #   inject_memories_in_instructions: true
   #   max_instructions_memories: 20
   # openai_compaction:

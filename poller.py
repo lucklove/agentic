@@ -25,6 +25,14 @@ import logfire
 from pydantic_ai import Agent
 from pydantic_ai.usage import UsageLimits
 
+from conversation import (
+    is_conversation_comment,
+    load_history,
+    marker_for,
+    save_history,
+    subject_message_key,
+    visible_comments,
+)
 from deps import AgentDeps, NotificationSubject
 
 # Gitea notification subject types we care about.
@@ -43,6 +51,7 @@ _CONTEXT_MESSAGE_TEMPLATE = Template(
 Repository: $repo
 Type: $type_label #$number
 Title: $title
+$visible_comments_hint
 
 Use your available tools to read the full context of $type_label #$number in $repo before deciding what action to take, then take the required action now when your available tools allow it."""
 )
@@ -88,6 +97,14 @@ def _is_closed(item: dict[str, Any]) -> bool:
 
 def _mentioned_users(body: str) -> set[str]:
     return {match.group(1) for match in _MENTION_PATTERN.finditer(body)}
+
+
+def _is_self_marker_comment(comment: dict[str, Any]) -> bool:
+    author = _login(comment.get("user"))
+    if not author:
+        return False
+
+    return marker_for(author) in (comment.get("body") or "")
 
 
 def _notification_span_name(
@@ -185,10 +202,11 @@ class NotificationContext:
 
     async def get_last_subject_comment(self) -> dict[str, Any] | None:
         comments = await self.get_subject_comments()
-        if not comments:
-            return None
+        for comment in reversed(comments):
+            if not _is_self_marker_comment(comment):
+                return comment
 
-        return comments[-1]
+        return None
 
     async def is_subject_relevant_to_agent(
         self,
@@ -216,7 +234,10 @@ class NotificationContext:
         return [dep for dep in dependencies if not _is_closed(dep)]
 
 
-def _build_context_message(notif: dict[str, Any]) -> str:
+def _build_context_message(
+    notif: dict[str, Any],
+    visible_count: int = 0,
+) -> str:
     """Render the initial user message for an agent run from a notification."""
     subject = notif["subject"]
     repo: str = notif["repository"]["full_name"]
@@ -226,11 +247,21 @@ def _build_context_message(notif: dict[str, Any]) -> str:
 
     type_label = "issue" if subject_type == "Issue" else "pull request"
 
+    if visible_count > 0:
+        visible_comments_hint = (
+            f"There are currently {visible_count} visible comment(s) on this thread "
+            "(conversation-type comments are excluded). "
+            "Read the latest context with tools before taking action."
+        )
+    else:
+        visible_comments_hint = "No visible comments yet on this thread."
+
     return _CONTEXT_MESSAGE_TEMPLATE.substitute(
         repo=repo,
         type_label=type_label,
         number=number,
         title=title,
+        visible_comments_hint=visible_comments_hint,
     )
 
 
@@ -278,32 +309,88 @@ async def _handle_notification(
                 gitea_username=deps.gitea_username,
                 open_dependencies=len(open_dependencies),
             )
-        elif not await notif_ctx.is_subject_relevant_to_agent(
-            subject,
-            deps.gitea_username,
-        ):
-            logfire.info(
-                "skip notification unrelated to agent",
-                repo=notif_ctx.repo_full_name,
-                number=notif_ctx.number,
-                gitea_username=deps.gitea_username,
-            )
         else:
-            run_deps = replace(
-                deps,
-                notification_subject=NotificationSubject(
-                    owner=notif_ctx.owner,
-                    repo=notif_ctx.repo,
+            comments = await notif_ctx.get_subject_comments()
+            last_comment = comments[-1] if comments else None
+            last_author = _login(last_comment.get("user")) if last_comment else None
+
+            if last_author == deps.gitea_username:
+                logfire.info(
+                    "skip notification: last comment authored by agent",
+                    repo=notif_ctx.repo_full_name,
                     number=notif_ctx.number,
-                    subject_type=notif_ctx.subject_type,
-                ),
-            )
-            result = await agent.run(
-                _build_context_message(notif),
-                deps=run_deps,
-                usage_limits=_agent_run_usage_limits(request_limit),
-            )
-            logfire.info("agent output", output=result.output)
+                    gitea_username=deps.gitea_username,
+                )
+            else:
+                run_deps = replace(
+                    deps,
+                    notification_subject=NotificationSubject(
+                        owner=notif_ctx.owner,
+                        repo=notif_ctx.repo,
+                        number=notif_ctx.number,
+                        subject_type=notif_ctx.subject_type,
+                    ),
+                )
+
+                # Determine the input message.
+                if last_comment is not None and is_conversation_comment(
+                    last_comment.get("body", ""),
+                    deps.gitea_username,
+                ):
+                    input_message = last_comment["body"]
+                elif not await notif_ctx.is_subject_relevant_to_agent(
+                    subject,
+                    deps.gitea_username,
+                ):
+                    logfire.info(
+                        "skip notification unrelated to agent",
+                        repo=notif_ctx.repo_full_name,
+                        number=notif_ctx.number,
+                        gitea_username=deps.gitea_username,
+                    )
+                    await _mark_notification_read(http, notif_ctx)
+                    return
+                else:
+                    vis = visible_comments(comments, deps.gitea_username)
+                    input_message = _build_context_message(
+                        notif, visible_count=len(vis)
+                    )
+
+                # Load message history.
+                history: list[Any] = []
+                if run_deps.messages_dir is not None:
+                    key = subject_message_key(
+                        notif_ctx.owner,
+                        notif_ctx.repo,
+                        notif_ctx.subject_type,
+                        notif_ctx.number,
+                    )
+                    history = load_history(run_deps.messages_dir, key)
+
+                result = await agent.run(
+                    input_message,
+                    deps=run_deps,
+                    usage_limits=_agent_run_usage_limits(request_limit),
+                    message_history=history or None,
+                )
+                logfire.info("agent output", output=result.output)
+
+                # Save message history.
+                if run_deps.messages_dir is not None:
+                    save_history(run_deps.messages_dir, key, result.all_messages())
+
+                # Post agent output as a comment with conversation marker.
+                comment_body = f"{marker_for(deps.gitea_username)}\n\n{result.output}"
+                await http.post(
+                    _SUBJECT_PATH_TEMPLATE.substitute(
+                        owner=notif_ctx.owner,
+                        repo=notif_ctx.repo,
+                        path="issues",
+                        number=notif_ctx.number,
+                    )
+                    + "/comments",
+                    json={"body": comment_body},
+                )
 
         await _mark_notification_read(http, notif_ctx)
 
