@@ -32,8 +32,13 @@ def test_instructions_include_shared_rules() -> None:
     instructions = HarnessCapability().get_instructions()
 
     assert "Harness Rules" in instructions
-    assert "reply in the thread by calling `gitea_issue_write`" in instructions
-    assert "even when the notification subject is a pull request" in instructions
+    assert "automatically posted as a Gitea issue/PR comment" in instructions
+    assert "do not use `gitea_*` tools to post a normal reply/comment" in instructions
+    assert "do not @mention anyone in your final response" in instructions
+    assert (
+        "post that mention as a separate comment with `gitea_issue_write`"
+        in instructions
+    )
     assert "Do not react to your own comments" in instructions
     assert (
         "Read the full relevant issue or pull request context before acting."
@@ -54,10 +59,7 @@ def test_instructions_include_shared_rules() -> None:
         "reply in the thread by calling `gitea_issue_write` and @mention the requester whether the task succeeded or failed"
         in instructions
     )
-    assert (
-        "post a helpful comment with relevant information by calling `gitea_issue_write` and do not @mention anyone"
-        in instructions
-    )
+    assert "provide helpful relevant information in your final response" in instructions
 
 
 def test_before_tool_execute_allows_non_review_request_tool(deps: AgentDeps) -> None:
@@ -238,6 +240,22 @@ def test_before_output_process_allows_partial_output(deps: AgentDeps) -> None:
     )
 
     assert output == "done"
+
+
+def test_before_output_process_retries_when_final_output_mentions_user(
+    deps: AgentDeps,
+) -> None:
+    cap = HarnessCapability()
+    ctx = SimpleNamespace(deps=deps, partial_output=False)
+
+    with pytest.raises(ModelRetry, match="Do not @mention anyone"):
+        asyncio.run(
+            cap.before_output_process(
+                ctx,
+                output_context=object(),
+                output="Need input from @debug_agent.",
+            )
+        )
 
 
 def test_before_output_process_allows_when_subject_already_closed(

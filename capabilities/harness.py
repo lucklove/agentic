@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -14,13 +15,18 @@ from pydantic_ai.tools import RunContext
 from conversation import is_conversation_comment, visible_comments
 from deps import AgentDeps, NotificationSubject
 
+_MENTION_PATTERN = re.compile(r"(?:^|\W)@[A-Za-z0-9._-]+(?=\W|$)")
+
 _HARNESS_INSTRUCTIONS = """## Harness Rules
 
 - Highest priority:
+  - your final response from each notification run is automatically posted as a Gitea issue/PR comment.
+  - do not use `gitea_*` tools to post a normal reply/comment on the current thread; use your final response for that.
+  - do not @mention anyone in your final response. If you need to @mention someone so their agent treats the thread as relevant, post that mention as a separate comment with `gitea_issue_write` instead.
   - if the last message in the issue or pull request @mentions you, choose exactly one of these actions:
     - if the work is complete and the subject already meets the close or merge condition, apply that final state change now and do not post any reply.
     - if the mention asks you to do something, do it first, then reply in the thread by calling `gitea_issue_write` and @mention the requester whether the task succeeded or failed, even when the notification subject is a pull request.
-    - if the mention only references you without asking for action, post a helpful comment with relevant information by calling `gitea_issue_write` and do not @mention anyone, even when the notification subject is a pull request.
+    - if the mention only references you without asking for action, provide helpful relevant information in your final response.
   - if the last message in the issue or pull request @mentions someone else, do nothing.
 - Do not react to your own comments, except that you are mentioned in the last message.
 - Read the full relevant issue or pull request context before acting.
@@ -114,6 +120,15 @@ class HarnessCapability(AbstractCapability[AgentDeps]):
         if ctx.partial_output:
             return output
 
+        if isinstance(output, str) and _MENTION_PATTERN.search(output):
+            raise ModelRetry(
+                "Do not @mention anyone in your final response because final "
+                "responses are posted as conversation-type comments and will not "
+                "make the mentioned agent treat the thread as relevant. If you "
+                "need to @mention someone, post that mention as a separate comment "
+                "with `gitea_issue_write` before producing final output."
+            )
+
         subject = ctx.deps.notification_subject
         if subject is None:
             return output
@@ -143,10 +158,11 @@ class HarnessCapability(AbstractCapability[AgentDeps]):
             "(1) if the work is complete and the subject already meets the close "
             "or merge condition, apply that final state change now and do not post "
             "any reply; (2) if the mention asks you to do something, do it first, "
-            "then reply in the thread and @mention the requester whether the task "
-            "succeeded or failed; (3) if the mention only references you without "
-            "asking for action, post a helpful comment with relevant information "
-            "and do not @mention anyone."
+            "then reply in the thread by calling `gitea_issue_write` and @mention "
+            "the requester whether the task succeeded or failed; (3) if the "
+            "mention only references you without asking for "
+            "action, provide helpful relevant information in your final response "
+            "without @mentioning anyone."
         )
 
     async def after_tool_execute(
