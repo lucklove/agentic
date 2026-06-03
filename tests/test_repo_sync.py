@@ -99,9 +99,10 @@ def test_discover_gitea_url_reads_configs(tmp_path: Path) -> None:
 gitea:
   base_url: http://gitea.ai
 """)
-    profiles_dir = tmp_path / "profiles"
-    profiles_dir.mkdir()
-    (profiles_dir / "ops_agent.yaml").write_text("""
+    agentic_dir = tmp_path / ".agentic"
+    profile_dir = agentic_dir / "ops_agent"
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "profile.yaml").write_text("""
 gitea:
   token: top-secret
 """)
@@ -111,7 +112,7 @@ gitea:
         "docker-image-controller",
         "ops_agent",
         global_config_path=global_config,
-        profiles_dir=profiles_dir,
+        agentic_dir=agentic_dir,
     )
 
     assert url == "http://top-secret@gitea.ai/autonomous/docker-image-controller.git"

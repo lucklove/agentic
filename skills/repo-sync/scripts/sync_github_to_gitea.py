@@ -23,7 +23,7 @@ REMOTE_LINE_RE = re.compile(
 SSH_GITHUB_REMOTE_RE = re.compile(r"^[^@\s]+@github\.com:")
 ROOT_DIR = Path(__file__).resolve().parents[3]
 DEFAULT_GLOBAL_CONFIG = ROOT_DIR / "agentic.yaml"
-DEFAULT_PROFILES_DIR = ROOT_DIR / "profiles"
+DEFAULT_AGENTIC_DIR = Path.home() / ".agentic"
 
 
 def redact_argument(argument: str) -> str:
@@ -150,10 +150,8 @@ def discover_github_url(repo_dir: Path) -> str:
     )
 
 
-def profile_token(
-    profile_name: str, *, profiles_dir: Path = DEFAULT_PROFILES_DIR
-) -> str:
-    profile_path = profiles_dir / f"{profile_name}.yaml"
+def profile_token(profile_name: str, *, agentic_dir: Path = DEFAULT_AGENTIC_DIR) -> str:
+    profile_path = agentic_dir / profile_name / "profile.yaml"
     data = load_yaml(profile_path)
     gitea = data.get("gitea")
     if not isinstance(gitea, dict) or not isinstance(gitea.get("token"), str):
@@ -181,7 +179,7 @@ def discover_gitea_url(
     profile_name: str,
     *,
     global_config_path: Path = DEFAULT_GLOBAL_CONFIG,
-    profiles_dir: Path = DEFAULT_PROFILES_DIR,
+    agentic_dir: Path = DEFAULT_AGENTIC_DIR,
 ) -> str:
     global_config = load_yaml(global_config_path)
     gitea = global_config.get("gitea")
@@ -189,7 +187,7 @@ def discover_gitea_url(
         raise SystemExit(
             f"missing gitea.base_url in global config: {global_config_path}"
         )
-    token = profile_token(profile_name, profiles_dir=profiles_dir)
+    token = profile_token(profile_name, agentic_dir=agentic_dir)
     return build_gitea_url(gitea["base_url"], token, owner, repo)
 
 
