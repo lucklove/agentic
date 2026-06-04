@@ -43,7 +43,7 @@ class FakeHTTP:
             {
                 "id": 1,
                 "body": "Please handle this @code_agent",
-                "user": "human",
+                "user": {"login": "human"},
             }
         ]
         self.reviews = reviews or []
@@ -212,7 +212,7 @@ def test_handle_notification_marks_thread_read_when_last_comment_mentions_agent(
                 {
                     "id": 1,
                     "body": "Please take a look @code_agent",
-                    "user": "human",
+                    "user": {"login": "human"},
                 }
             ],
         )
@@ -241,17 +241,17 @@ def test_handle_notification_uses_unseen_mention_not_last_comment(
                 {
                     "id": 1,
                     "body": "<!-- agentic:@code_agent last_seen_comment_id=0 -->\n\ndone",
-                    "user": "code_agent",
+                    "user": {"login": "code_agent"},
                 },
                 {
                     "id": 2,
                     "body": "Please take a look @code_agent",
-                    "user": "human",
+                    "user": {"login": "human"},
                 },
                 {
                     "id": 3,
                     "body": "Can you review this? @review_agent",
-                    "user": "human",
+                    "user": {"login": "human"},
                 },
             ],
         )
@@ -284,7 +284,7 @@ def test_handle_notification_skips_when_no_unseen_comment_mentions_agent(
                 {
                     "id": 1,
                     "body": "No direct mention here.",
-                    "user": "human",
+                    "user": {"login": "human"},
                 }
             ],
         )
@@ -313,7 +313,7 @@ def test_handle_notification_skips_when_last_comment_mentions_someone_else(
                 {
                     "id": 1,
                     "body": "Please check this @review_agent",
-                    "user": "human",
+                    "user": {"login": "human"},
                 }
             ],
         )
@@ -342,7 +342,7 @@ def test_handle_notification_skips_when_last_comment_is_by_agent(
                 {
                     "id": 1,
                     "body": "I already handled this @code_agent",
-                    "user": "code_agent",
+                    "user": {"login": "code_agent"},
                 }
             ],
         )
@@ -373,7 +373,7 @@ def test_handle_notification_skips_pull_when_last_comment_mentions_someone_else(
                 {
                     "id": 1,
                     "body": "Can you review this? @review_agent",
-                    "user": "human",
+                    "user": {"login": "human"},
                 }
             ],
         )
@@ -394,12 +394,12 @@ def test_get_last_subject_comment_skips_self_marker_comment() -> None:
                 {
                     "id": 1,
                     "body": "Please take a look @code_agent",
-                    "user": "human",
+                    "user": {"login": "human"},
                 },
                 {
                     "id": 2,
                     "body": "<!-- agentic:@review_agent last_seen_comment_id=1 -->\n\nRequested changes.",
-                    "user": "review_agent",
+                    "user": {"login": "review_agent"},
                 },
             ]
         )
@@ -408,7 +408,7 @@ def test_get_last_subject_comment_skips_self_marker_comment() -> None:
         last_comment = await ctx.get_last_subject_comment()
 
         assert last_comment is not None
-        assert last_comment["user"] == "human"
+        assert last_comment["user"]["login"] == "human"
 
     asyncio.run(run())
 
@@ -428,7 +428,7 @@ def test_handle_notification_skips_when_only_other_agent_marker_after_seen(
                 {
                     "id": 1,
                     "body": "<!-- agentic:@review_agent last_seen_comment_id=0 -->\n\nRequested changes.",
-                    "user": "review_agent",
+                    "user": {"login": "review_agent"},
                 }
             ],
         )
@@ -459,7 +459,7 @@ def test_handle_notification_marks_pull_thread_read_when_last_comment_mentions_a
                 {
                     "id": 1,
                     "body": "Can you review this? @code_agent",
-                    "user": "human",
+                    "user": {"login": "human"},
                 }
             ],
         )
@@ -490,7 +490,7 @@ def test_handle_notification_skips_when_last_comment_is_by_agent_even_with_menti
                 {
                     "id": 1,
                     "body": "Done! @human",
-                    "user": "code_agent",
+                    "user": {"login": "code_agent"},
                 }
             ],
         )
@@ -523,7 +523,7 @@ def test_handle_notification_conversation_marker_uses_body_as_input(
                 {
                     "id": 1,
                     "body": marker_body,
-                    "user": "human",
+                    "user": {"login": "human"},
                 }
             ],
         )
@@ -561,7 +561,7 @@ def test_handle_notification_conversation_marker_does_not_strip_marker(
                 {
                     "id": 1,
                     "body": body_with_marker,
-                    "user": "human",
+                    "user": {"login": "human"},
                 }
             ],
         )
@@ -609,7 +609,7 @@ def test_handle_notification_does_not_auto_post_when_skipped(
                 {
                     "id": 1,
                     "body": "Done by agent",
-                    "user": "code_agent",
+                    "user": {"login": "code_agent"},
                 }
             ],
         )
@@ -683,5 +683,55 @@ def test_handle_notification_checks_open_dependencies_before_relevance(
             await _handle_notification(PassingAgent(), http, notification(), deps)
 
         assert http.patches == ["/api/v1/notifications/threads/123"]
+
+    asyncio.run(run())
+
+
+def test_handle_notification_excludes_agent_own_marker_from_input_message(
+    deps: AgentDeps,
+) -> None:
+    """Regression: the agent's own marker comment must not appear in input.
+
+    When the raw Gitea HTTP payload uses a dict for ``user``, the old
+    ``_comment_author`` returned ``None`` for the agent's own comment,
+    causing it to leak into ``self_marker_messages`` alongside the human's
+    reply.  This test ensures only the human's conversation comment is passed
+    as the input message.
+    """
+
+    async def run() -> None:
+        http = FakeHTTP(
+            subject={
+                "state": "open",
+                "closed_at": None,
+                "user": {"login": "human"},
+                "assignees": [],
+            },
+            comments=[
+                {
+                    "id": 1,
+                    "body": "@code_agent please fix",
+                    "user": {"login": "human"},
+                },
+                {
+                    "id": 2,
+                    "body": "<!-- agentic:@code_agent last_seen_comment_id=1 -->\n\ndone",
+                    "user": {"login": "code_agent"},
+                },
+                {
+                    "id": 3,
+                    "body": "<!-- agentic:@code_agent last_seen_comment_id=1 -->\n\nsecond reply from human",
+                    "user": {"login": "human"},
+                },
+            ],
+        )
+        agent = PassingAgent()
+
+        await _handle_notification(agent, http, notification(), deps)
+
+        assert agent.run_message is not None
+        assert agent.run_message == (
+            "<!-- agentic:@code_agent last_seen_comment_id=1 -->\n\nsecond reply from human"
+        )
 
     asyncio.run(run())

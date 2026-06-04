@@ -76,8 +76,19 @@ def _parse_repo(full_name: str) -> tuple[str, str]:
 
 
 def _comment_author(comment: dict[str, Any]) -> str | None:
+    """Extract the comment author's login name.
+
+    Gitea's real HTTP API returns ``user`` as an object with ``login`` (and
+    ``username``) keys, but the ``gitea_*`` MCP tools normalize it to a plain
+    string.  We handle both shapes so marker-based self-authorship detection
+    works on the real payload.
+    """
     user = comment.get("user")
-    return user if isinstance(user, str) else None
+    if isinstance(user, str):
+        return user
+    if isinstance(user, dict):
+        return user.get("login") or user.get("username")
+    return None
 
 
 def _is_closed(item: dict[str, Any]) -> bool:
