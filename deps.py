@@ -29,3 +29,4 @@ class AgentDeps:
     notification_subject: NotificationSubject | None = None
     profile_name: str = ""
     messages_dir: Path | None = None
+    last_seen_comment_id: int = 0

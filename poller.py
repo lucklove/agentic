@@ -27,11 +27,11 @@ from pydantic_ai.usage import UsageLimits
 
 from conversation import (
     is_conversation_comment,
+    last_seen_comment_id_from_marker,
     load_history,
     marker_for,
     save_history,
     subject_message_key,
-    visible_comments,
 )
 from deps import AgentDeps, NotificationSubject
 
@@ -75,20 +75,9 @@ def _parse_repo(full_name: str) -> tuple[str, str]:
     return owner, repo
 
 
-def _login(user: dict[str, Any] | None) -> str | None:
-    if not user:
-        return None
-    return user.get("login") or user.get("username")
-
-
-def _collect_users(item: dict[str, Any]) -> set[str]:
-    """Return creator, assignees, and reviewers from an issue/PR payload."""
-    users = {_login(item.get("user")), _login(item.get("assignee"))}
-
-    for field in ("assignees", "requested_reviewers", "reviewers"):
-        users.update(_login(user) for user in item.get(field, []) or [])
-
-    return {user for user in users if user}
+def _comment_author(comment: dict[str, Any]) -> str | None:
+    user = comment.get("user")
+    return user if isinstance(user, str) else None
 
 
 def _is_closed(item: dict[str, Any]) -> bool:
@@ -100,11 +89,72 @@ def _mentioned_users(body: str) -> set[str]:
 
 
 def _is_self_marker_comment(comment: dict[str, Any]) -> bool:
-    author = _login(comment.get("user"))
+    author = _comment_author(comment)
     if not author:
         return False
 
-    return marker_for(author) in (comment.get("body") or "")
+    return is_conversation_comment(comment.get("body", ""), author)
+
+
+def _comment_id(comment: dict[str, Any]) -> int:
+    return int(comment.get("id") or 0)
+
+
+def _latest_seen_comment_id(comments: list[dict[str, Any]], agent_name: str) -> int:
+    for comment in reversed(comments):
+        seen_id = last_seen_comment_id_from_marker(
+            comment.get("body", ""),
+            agent_name,
+        )
+        if seen_id is not None:
+            return seen_id
+    return 0
+
+
+def _comments_after(
+    comments: list[dict[str, Any]],
+    last_seen_comment_id: int,
+) -> list[dict[str, Any]]:
+    return [
+        comment for comment in comments if _comment_id(comment) > last_seen_comment_id
+    ]
+
+
+def _mentions_agent(comment: dict[str, Any], agent_name: str) -> bool:
+    if _comment_author(comment) == agent_name:
+        return False
+    return agent_name in _mentioned_users(comment.get("body") or "")
+
+
+def _mentioned_comment_ids_message(
+    notif_ctx: NotificationContext,
+    last_seen_comment_id: int,
+) -> str:
+    type_label = "issue" if notif_ctx.subject_type == "Issue" else "pull request"
+    return (
+        f"Someone mentioned you in {type_label} "
+        f"{notif_ctx.repo_full_name}#{notif_ctx.number}. "
+        f"Your last seen comment id is {last_seen_comment_id}. "
+        "Read the current comments and consider comments with "
+        f"id > {last_seen_comment_id}.\n\n"
+        "Example:\n"
+        'filter(lambda m: m["id"] > '
+        f"{last_seen_comment_id}, "
+        'await gitea_issue_read(method="get_comments", ...))'
+    )
+
+
+def _self_marker_messages_after(
+    comments: list[dict[str, Any]],
+    last_seen_comment_id: int,
+    agent_name: str,
+) -> list[str]:
+    return [
+        comment.get("body", "")
+        for comment in _comments_after(comments, last_seen_comment_id)
+        if _comment_author(comment) != agent_name
+        and is_conversation_comment(comment.get("body", ""), agent_name)
+    ]
 
 
 def _notification_span_name(
@@ -170,22 +220,6 @@ class NotificationContext:
         resp.raise_for_status()
         return resp.json()
 
-    async def collect_pr_reviewers(self) -> set[str]:
-        resp = await self.http.get(
-            _SUBJECT_PATH_TEMPLATE.substitute(
-                owner=self.owner,
-                repo=self.repo,
-                path="pulls",
-                number=self.number,
-            )
-            + "/reviews"
-        )
-        resp.raise_for_status()
-        reviews: list[dict[str, Any]] = resp.json()
-        return {
-            user for user in (_login(review.get("user")) for review in reviews) if user
-        }
-
     async def get_subject_comments(self) -> list[dict[str, Any]]:
         resp = await self.http.get(
             _SUBJECT_PATH_TEMPLATE.substitute(
@@ -210,24 +244,14 @@ class NotificationContext:
 
     async def is_subject_relevant_to_agent(
         self,
-        subject: dict[str, Any],
+        comments: list[dict[str, Any]],
         gitea_username: str,
     ) -> bool:
-        last_comment = await self.get_last_subject_comment()
-        if last_comment is not None:
-            if _login(last_comment.get("user")) == gitea_username:
-                return False
-
-            mentioned_users = _mentioned_users(last_comment.get("body") or "")
-            if mentioned_users:
-                return gitea_username in mentioned_users
-
-        users = _collect_users(subject)
-
-        if self.subject_type == "Pull" and gitea_username not in users:
-            users.update(await self.collect_pr_reviewers())
-
-        return gitea_username in users
+        last_seen_comment_id = _latest_seen_comment_id(comments, gitea_username)
+        return any(
+            _mentions_agent(comment, gitea_username)
+            for comment in _comments_after(comments, last_seen_comment_id)
+        )
 
     async def open_dependencies(self) -> list[dict[str, Any]]:
         dependencies = await self.get_dependencies()
@@ -311,86 +335,90 @@ async def _handle_notification(
             )
         else:
             comments = await notif_ctx.get_subject_comments()
-            last_comment = comments[-1] if comments else None
-            last_author = _login(last_comment.get("user")) if last_comment else None
+            last_seen_comment_id = _latest_seen_comment_id(
+                comments,
+                deps.gitea_username,
+            )
+            new_comments = _comments_after(comments, last_seen_comment_id)
+            self_marker_messages = _self_marker_messages_after(
+                comments,
+                last_seen_comment_id,
+                deps.gitea_username,
+            )
+            mentioned_comment_ids = [
+                _comment_id(comment)
+                for comment in new_comments
+                if _mentions_agent(comment, deps.gitea_username)
+            ]
 
-            if last_author == deps.gitea_username:
+            if not self_marker_messages and not mentioned_comment_ids:
                 logfire.info(
-                    "skip notification: last comment authored by agent",
+                    "skip notification unrelated to agent",
                     repo=notif_ctx.repo_full_name,
                     number=notif_ctx.number,
                     gitea_username=deps.gitea_username,
                 )
+                await _mark_notification_read(http, notif_ctx)
+                return
+
+            run_deps = replace(
+                deps,
+                notification_subject=NotificationSubject(
+                    owner=notif_ctx.owner,
+                    repo=notif_ctx.repo,
+                    number=notif_ctx.number,
+                    subject_type=notif_ctx.subject_type,
+                ),
+                last_seen_comment_id=last_seen_comment_id,
+            )
+
+            # Determine the input message.
+            if self_marker_messages:
+                input_message = "\n\n".join(self_marker_messages)
             else:
-                run_deps = replace(
-                    deps,
-                    notification_subject=NotificationSubject(
-                        owner=notif_ctx.owner,
-                        repo=notif_ctx.repo,
-                        number=notif_ctx.number,
-                        subject_type=notif_ctx.subject_type,
-                    ),
+                input_message = _mentioned_comment_ids_message(
+                    notif_ctx,
+                    last_seen_comment_id,
                 )
 
-                # Determine the input message.
-                if last_comment is not None and is_conversation_comment(
-                    last_comment.get("body", ""),
-                    deps.gitea_username,
-                ):
-                    input_message = last_comment["body"]
-                elif not await notif_ctx.is_subject_relevant_to_agent(
-                    subject,
-                    deps.gitea_username,
-                ):
-                    logfire.info(
-                        "skip notification unrelated to agent",
-                        repo=notif_ctx.repo_full_name,
-                        number=notif_ctx.number,
-                        gitea_username=deps.gitea_username,
-                    )
-                    await _mark_notification_read(http, notif_ctx)
-                    return
-                else:
-                    vis = visible_comments(comments, deps.gitea_username)
-                    input_message = _build_context_message(
-                        notif, visible_count=len(vis)
-                    )
-
-                # Load message history.
-                history: list[Any] = []
-                if run_deps.messages_dir is not None:
-                    key = subject_message_key(
-                        notif_ctx.owner,
-                        notif_ctx.repo,
-                        notif_ctx.subject_type,
-                        notif_ctx.number,
-                    )
-                    history = load_history(run_deps.messages_dir, key)
-
-                result = await agent.run(
-                    input_message,
-                    deps=run_deps,
-                    usage_limits=_agent_run_usage_limits(request_limit),
-                    message_history=history or None,
+            # Load message history.
+            history: list[Any] = []
+            if run_deps.messages_dir is not None:
+                key = subject_message_key(
+                    notif_ctx.owner,
+                    notif_ctx.repo,
+                    notif_ctx.subject_type,
+                    notif_ctx.number,
                 )
-                logfire.info("agent output", output=result.output)
+                history = load_history(run_deps.messages_dir, key)
 
-                # Save message history.
-                if run_deps.messages_dir is not None:
-                    save_history(run_deps.messages_dir, key, result.all_messages())
+            result = await agent.run(
+                input_message,
+                deps=run_deps,
+                usage_limits=_agent_run_usage_limits(request_limit),
+                message_history=history or None,
+            )
+            logfire.info("agent output", output=result.output)
 
-                # Post agent output as a comment with conversation marker.
-                comment_body = f"{marker_for(deps.gitea_username)}\n\n{result.output}"
-                await http.post(
-                    _SUBJECT_PATH_TEMPLATE.substitute(
-                        owner=notif_ctx.owner,
-                        repo=notif_ctx.repo,
-                        path="issues",
-                        number=notif_ctx.number,
-                    )
-                    + "/comments",
-                    json={"body": comment_body},
+            # Save message history.
+            if run_deps.messages_dir is not None:
+                save_history(run_deps.messages_dir, key, result.all_messages())
+
+            # Post agent output as a comment with conversation marker.
+            comment_body = (
+                f"{marker_for(deps.gitea_username, run_deps.last_seen_comment_id)}"
+                f"\n\n{result.output}"
+            )
+            await http.post(
+                _SUBJECT_PATH_TEMPLATE.substitute(
+                    owner=notif_ctx.owner,
+                    repo=notif_ctx.repo,
+                    path="issues",
+                    number=notif_ctx.number,
                 )
+                + "/comments",
+                json={"body": comment_body},
+            )
 
         await _mark_notification_read(http, notif_ctx)
 

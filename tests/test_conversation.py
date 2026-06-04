@@ -6,6 +6,7 @@ from pydantic_ai.messages import ModelRequest, UserPromptPart
 
 from conversation import (
     is_conversation_comment,
+    last_seen_comment_id_from_marker,
     load_history,
     marker_for,
     save_history,
@@ -15,16 +16,25 @@ from conversation import (
 
 
 def test_marker_for_basic() -> None:
-    assert marker_for("code_agent") == "<!-- agentic:@code_agent -->"
+    assert marker_for("code_agent") == (
+        "<!-- agentic:@code_agent last_seen_comment_id=0 -->"
+    )
 
 
 def test_marker_for_special_characters() -> None:
-    assert marker_for("my.bot-1") == "<!-- agentic:@my.bot-1 -->"
+    assert marker_for("my.bot-1", 42) == (
+        "<!-- agentic:@my.bot-1 last_seen_comment_id=42 -->"
+    )
 
 
 def test_is_conversation_comment_true() -> None:
-    body = "<!-- agentic:@code_agent -->\n\nI fixed the bug."
+    body = "<!-- agentic:@code_agent last_seen_comment_id=12 -->\n\nI fixed the bug."
     assert is_conversation_comment(body, "code_agent") is True
+
+
+def test_old_marker_is_not_conversation_comment() -> None:
+    body = "<!-- agentic:@code_agent -->\n\nI fixed the bug."
+    assert is_conversation_comment(body, "code_agent") is False
 
 
 def test_is_conversation_comment_false_no_marker() -> None:
@@ -33,8 +43,20 @@ def test_is_conversation_comment_false_no_marker() -> None:
 
 
 def test_is_conversation_comment_false_different_agent() -> None:
-    body = "<!-- agentic:@review_agent -->\n\nLGTM"
+    body = "<!-- agentic:@review_agent last_seen_comment_id=12 -->\n\nLGTM"
     assert is_conversation_comment(body, "code_agent") is False
+
+
+def test_last_seen_comment_id_from_marker() -> None:
+    body = "<!-- agentic:@code_agent last_seen_comment_id=123 -->\n\nDone."
+    assert last_seen_comment_id_from_marker(body, "code_agent") == 123
+
+
+def test_last_seen_comment_id_from_marker_missing() -> None:
+    assert (
+        last_seen_comment_id_from_marker("<!-- agentic:@code_agent -->", "code_agent")
+        is None
+    )
 
 
 def test_is_conversation_comment_empty_body() -> None:
@@ -45,11 +67,11 @@ def test_visible_comments_filters_conversation() -> None:
     comments = [
         {"body": "Regular context comment", "user": {"login": "human"}},
         {
-            "body": "<!-- agentic:@code_agent -->\n\nDone.",
+            "body": "<!-- agentic:@code_agent last_seen_comment_id=12 -->\n\nDone.",
             "user": {"login": "code_agent"},
         },
         {
-            "body": "<!-- agentic:@code_agent -->\n\nThanks @code_agent",
+            "body": "<!-- agentic:@code_agent last_seen_comment_id=12 -->\n\nThanks @code_agent",
             "user": {"login": "human"},
         },
         {"body": "Another regular comment", "user": {"login": "other"}},
@@ -62,7 +84,7 @@ def test_visible_comments_filters_conversation() -> None:
 
 def test_visible_comments_keeps_different_agent_marker() -> None:
     comments = [
-        {"body": "<!-- agentic:@review_agent -->\n\nLGTM"},
+        {"body": "<!-- agentic:@review_agent last_seen_comment_id=12 -->\n\nLGTM"},
         {"body": "Regular comment"},
     ]
     result = visible_comments(comments, "code_agent")

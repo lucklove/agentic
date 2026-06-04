@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import pickle
+import re
 from pathlib import Path
 from typing import Any
 
@@ -22,21 +23,45 @@ from pydantic_ai.messages import ModelMessage
 __all__ = [
     "marker_for",
     "is_conversation_comment",
+    "last_seen_comment_id_from_marker",
     "visible_comments",
     "subject_message_key",
     "load_history",
     "save_history",
 ]
 
+_MARKER_TEMPLATE = (
+    "<!-- agentic:@{agent_name} last_seen_comment_id={last_seen_comment_id} -->"
+)
 
-def marker_for(agent_name: str) -> str:
+
+def marker_for(agent_name: str, last_seen_comment_id: int = 0) -> str:
     """Return the hidden HTML comment marker for *agent_name*."""
-    return f"<!-- agentic:@{agent_name} -->"
+    return _MARKER_TEMPLATE.format(
+        agent_name=agent_name,
+        last_seen_comment_id=last_seen_comment_id,
+    )
+
+
+def _marker_pattern(agent_name: str) -> re.Pattern[str]:
+    return re.compile(
+        r"<!--\s*agentic:@"
+        + re.escape(agent_name)
+        + r"\s+last_seen_comment_id=(\d+)\s*-->",
+    )
 
 
 def is_conversation_comment(body: str, agent_name: str) -> bool:
     """Return ``True`` if *body* contains the conversation marker for *agent_name*."""
-    return marker_for(agent_name) in (body or "")
+    return _marker_pattern(agent_name).search(body or "") is not None
+
+
+def last_seen_comment_id_from_marker(body: str, agent_name: str) -> int | None:
+    """Return the marker's last-seen comment id, if present."""
+    match = _marker_pattern(agent_name).search(body or "")
+    if match is None:
+        return None
+    return int(match.group(1))
 
 
 def visible_comments(
