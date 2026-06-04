@@ -5,13 +5,14 @@ from __future__ import annotations
 from typing import Callable
 
 import httpx
+import logfire
 from pydantic_ai.models import Model
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.retries import AsyncTenacityTransport, RetryConfig, wait_retry_after
-from tenacity import retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import RetryCallState, retry_if_exception_type, wait_exponential
 
 __all__ = ["build_model"]
 
@@ -49,6 +50,27 @@ def _validate_retryable_response(response: httpx.Response) -> None:
         response.raise_for_status()
 
 
+def _log_retrying_http_request(retry_state: RetryCallState) -> None:
+    """Log the last transient failure before tenacity sleeps and retries."""
+    if retry_state.outcome is None or not retry_state.outcome.failed:
+        return
+
+    error = retry_state.outcome.exception()
+    if error is None:
+        return
+
+    retry_delay_seconds = (
+        retry_state.next_action.sleep if retry_state.next_action else None
+    )
+
+    logfire.info(
+        f"model provider request failed, retrying after {retry_delay_seconds} seconds",
+        error_message=str(error),
+        attempt=retry_state.attempt_number,
+        retry_delay_seconds=retry_delay_seconds,
+    )
+
+
 def _build_retrying_http_client() -> httpx.AsyncClient:
     """Create a shared retry policy for transient model-provider failures."""
     transport = AsyncTenacityTransport(
@@ -65,7 +87,7 @@ def _build_retrying_http_client() -> httpx.AsyncClient:
                 fallback_strategy=wait_exponential(multiplier=1, max=30),
                 max_wait=120,
             ),
-            stop=stop_after_attempt(100),
+            before_sleep=_log_retrying_http_request,
             reraise=True,
         ),
         validate_response=_validate_retryable_response,
