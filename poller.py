@@ -245,17 +245,6 @@ class NotificationContext:
         comments: list[dict[str, Any]] = resp.json()
         return comments
 
-    async def is_subject_relevant_to_agent(
-        self,
-        comments: list[dict[str, Any]],
-        gitea_username: str,
-    ) -> bool:
-        last_seen_comment_id = _latest_seen_comment_id(comments, gitea_username)
-        return any(
-            _mentions_agent(comment, gitea_username)
-            for comment in _comments_after(comments, last_seen_comment_id)
-        )
-
     async def open_dependencies(self) -> list[dict[str, Any]]:
         dependencies = await self.get_dependencies()
         return [dep for dep in dependencies if not _is_closed(dep)]
