@@ -7,12 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from deps import AgentDeps
-from poller import (
-    NotificationContext,
-    _build_context_message,
-    _handle_notification,
-    _notification_span_name,
-)
+from poller import _build_context_message, _handle_notification, _notification_span_name
 
 
 class FakeResp:
@@ -383,32 +378,6 @@ def test_handle_notification_skips_pull_when_last_comment_mentions_someone_else(
 
         assert http.patches == ["/api/v1/notifications/threads/123"]
         assert agent.run_deps is None
-
-    asyncio.run(run())
-
-
-def test_get_last_subject_comment_skips_self_marker_comment() -> None:
-    async def run() -> None:
-        http = FakeHTTP(
-            comments=[
-                {
-                    "id": 1,
-                    "body": "Please take a look @code_agent",
-                    "user": {"login": "human"},
-                },
-                {
-                    "id": 2,
-                    "body": "<!-- agentic:@review_agent last_seen_comment_id=1 -->\n\nRequested changes.",
-                    "user": {"login": "review_agent"},
-                },
-            ]
-        )
-        ctx = NotificationContext(http=http, notif=notification())
-
-        last_comment = await ctx.get_last_subject_comment()
-
-        assert last_comment is not None
-        assert last_comment["user"]["login"] == "human"
 
     asyncio.run(run())
 

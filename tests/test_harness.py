@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
 
 import pytest
 from pydantic_ai import ModelRetry
@@ -35,6 +34,10 @@ def test_instructions_include_shared_rules() -> None:
     assert "do not use `gitea_*` tools to post a normal reply/comment" in instructions
     assert "must @mention at least one person other than yourself" in instructions
     assert "your final response may @mention people" in instructions
+    assert (
+        "if you need to reply to a specific person, @mention them in your final response"
+        in instructions
+    )
     assert "Do not react to your own comments" in instructions
     assert (
         "Read the full relevant issue or pull request context before acting."
@@ -49,13 +52,6 @@ def test_instructions_include_shared_rules() -> None:
     assert '`merge_style: "squash"`' in instructions
     assert "`delete_branch: true`" in instructions
     assert "not associated with an open PR" in instructions
-    assert "choose exactly one of these actions" in instructions
-    assert "apply that final state change now and do not post any reply" in instructions
-    assert (
-        "reply in the thread by calling `gitea_issue_write` and @mention the requester whether the task succeeded or failed"
-        in instructions
-    )
-    assert "provide helpful relevant information in your final response" in instructions
 
 
 def test_get_toolset_exposes_sleep_tool() -> None:
@@ -139,152 +135,6 @@ def test_before_tool_execute_allows_other_pull_request_methods(deps: AgentDeps) 
     )
 
     assert output == args
-
-
-def test_before_output_process_allows_missing_subject(deps: AgentDeps) -> None:
-    cap = HarnessCapability()
-    ctx = SimpleNamespace(
-        deps=AgentDeps(
-            backend=deps.backend,
-            gitea_username=deps.gitea_username,
-            gitea_base_url=deps.gitea_base_url,
-            gitea_token=deps.gitea_token,
-            notification_subject=None,
-        ),
-        partial_output=False,
-    )
-
-    output = asyncio.run(
-        cap.before_output_process(ctx, output_context=object(), output="done")
-    )
-
-    assert output == "done"
-
-
-def test_before_output_process_allows_partial_output(deps: AgentDeps) -> None:
-    cap = HarnessCapability()
-    ctx = SimpleNamespace(deps=deps, partial_output=True)
-
-    output = asyncio.run(
-        cap.before_output_process(ctx, output_context=object(), output="done")
-    )
-
-    assert output == "done"
-
-
-def test_before_output_process_allows_final_output_mentions_user(
-    deps: AgentDeps,
-) -> None:
-    cap = HarnessCapability()
-    ctx = SimpleNamespace(deps=deps, partial_output=False)
-
-    with patch.object(
-        cap,
-        "_is_subject_closed",
-        AsyncMock(return_value=True),
-    ):
-        output = asyncio.run(
-            cap.before_output_process(
-                ctx,
-                output_context=object(),
-                output="Need input from @debug_agent.",
-            )
-        )
-    assert output == "Need input from @debug_agent."
-
-
-def test_before_output_process_allows_when_subject_already_closed(
-    deps: AgentDeps,
-) -> None:
-    cap = HarnessCapability()
-    ctx = SimpleNamespace(deps=deps, partial_output=False)
-
-    with patch.object(
-        cap,
-        "_is_subject_closed",
-        AsyncMock(return_value=True),
-    ), patch.object(
-        cap,
-        "_get_last_comment",
-        AsyncMock(),
-    ) as get_last_comment:
-        output = asyncio.run(
-            cap.before_output_process(ctx, output_context=object(), output="done")
-        )
-
-    assert output == "done"
-    get_last_comment.assert_not_awaited()
-
-
-def test_before_output_process_allows_when_last_comment_does_not_mention_agent(
-    deps: AgentDeps,
-) -> None:
-    cap = HarnessCapability()
-    ctx = SimpleNamespace(deps=deps, partial_output=False)
-
-    with patch.object(
-        cap,
-        "_is_subject_closed",
-        AsyncMock(return_value=False),
-    ), patch.object(
-        cap,
-        "_get_last_comment",
-        AsyncMock(return_value={"body": "No mention here"}),
-    ):
-        output = asyncio.run(
-            cap.before_output_process(ctx, output_context=object(), output="done")
-        )
-
-    assert output == "done"
-
-
-def test_before_output_process_raises_when_last_comment_mentions_agent(
-    deps: AgentDeps,
-) -> None:
-    cap = HarnessCapability()
-    ctx = SimpleNamespace(deps=deps, partial_output=False)
-
-    with patch.object(
-        cap,
-        "_is_subject_closed",
-        AsyncMock(return_value=False),
-    ), patch.object(
-        cap,
-        "_get_last_comment",
-        AsyncMock(return_value={"body": "Please check this @code_agent"}),
-    ):
-        with pytest.raises(
-            ModelRetry,
-            match="choose exactly one of these actions",
-        ):
-            asyncio.run(
-                cap.before_output_process(ctx, output_context=object(), output="done")
-            )
-
-
-def test_before_output_process_allows_conversation_comment_with_marker(
-    deps: AgentDeps,
-) -> None:
-    cap = HarnessCapability()
-    ctx = SimpleNamespace(deps=deps, partial_output=False)
-    marker_body = (
-        "<!-- agentic:@code_agent last_seen_comment_id=12 -->\n\nI fixed the bug."
-    )
-
-    with patch.object(
-        cap,
-        "_is_subject_closed",
-        AsyncMock(return_value=False),
-    ), patch.object(
-        cap,
-        "_get_last_comment",
-        AsyncMock(return_value={"body": marker_body}),
-    ):
-        output = asyncio.run(
-            cap.before_output_process(ctx, output_context=object(), output="done")
-        )
-
-    assert output == "done"
 
 
 def test_after_tool_execute_filters_conversation_comments() -> None:

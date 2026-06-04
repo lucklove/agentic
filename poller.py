@@ -245,14 +245,6 @@ class NotificationContext:
         comments: list[dict[str, Any]] = resp.json()
         return comments
 
-    async def get_last_subject_comment(self) -> dict[str, Any] | None:
-        comments = await self.get_subject_comments()
-        for comment in reversed(comments):
-            if not _is_self_marker_comment(comment):
-                return comment
-
-        return None
-
     async def is_subject_relevant_to_agent(
         self,
         comments: list[dict[str, Any]],
