@@ -16,7 +16,7 @@ from pydantic_ai.toolsets.function import FunctionToolset
 from conversation import visible_comments
 from deps import AgentDeps
 
-_MENTION_PATTERN = re.compile(r"(?:^|\W)@[A-Za-z0-9._-]+(?=\W|$)")
+_MENTION_PATTERN = re.compile(r"(?:^|[^\w`])@[A-Za-z0-9._-]+(?=\W|$)")
 
 _HARNESS_INSTRUCTIONS = """## Harness Rules
 
@@ -26,6 +26,7 @@ _HARNESS_INSTRUCTIONS = """## Harness Rules
    - if you use `gitea_*` tools to create a comment, that comment must @mention at least one person other than yourself.
    - your final response may @mention people, but it is not required to @mention anyone.
    - if you need to reply to a specific person, @mention them in your final response.
+   - if you want to mention someone without notifying them, wrap it in backticks like `@someone`.
    - if new messages in the issue or pull request only @mention someone else, do nothing.
 - Do not react to your own comments, except that you are mentioned in the last message.
 - Read the full relevant issue or pull request context before acting.

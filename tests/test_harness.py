@@ -38,6 +38,7 @@ def test_instructions_include_shared_rules() -> None:
         "if you need to reply to a specific person, @mention them in your final response"
         in instructions
     )
+    assert "wrap it in backticks like `@someone`" in instructions
     assert "Do not react to your own comments" in instructions
     assert (
         "Read the full relevant issue or pull request context before acting."
@@ -87,6 +88,44 @@ def test_before_tool_execute_blocks_comment_without_other_mention(
     ctx = SimpleNamespace(deps=deps)
     tool_def = SimpleNamespace(name="gitea_issue_write")
     args = {"method": "add_comment", "body": "Done @code_agent"}
+
+    with pytest.raises(ModelRetry, match="must @mention"):
+        asyncio.run(
+            cap.before_tool_execute(
+                ctx,
+                call=SimpleNamespace(),
+                tool_def=tool_def,
+                args=args,
+            )
+        )
+
+
+def test_before_tool_execute_blocks_comment_with_only_backtick_wrapped_mention(
+    deps: AgentDeps,
+) -> None:
+    cap = HarnessCapability()
+    ctx = SimpleNamespace(deps=deps)
+    tool_def = SimpleNamespace(name="gitea_issue_write")
+    args = {"method": "add_comment", "body": "Done `@review_agent`"}
+
+    with pytest.raises(ModelRetry, match="must @mention"):
+        asyncio.run(
+            cap.before_tool_execute(
+                ctx,
+                call=SimpleNamespace(),
+                tool_def=tool_def,
+                args=args,
+            )
+        )
+
+
+def test_before_tool_execute_blocks_email_like_text(
+    deps: AgentDeps,
+) -> None:
+    cap = HarnessCapability()
+    ctx = SimpleNamespace(deps=deps)
+    tool_def = SimpleNamespace(name="gitea_issue_write")
+    args = {"method": "add_comment", "body": "Contact foo@bar for details."}
 
     with pytest.raises(ModelRetry, match="must @mention"):
         asyncio.run(

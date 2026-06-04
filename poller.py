@@ -45,7 +45,7 @@ _SUBJECT_PATH_TEMPLATE = Template("/api/v1/repos/$owner/$repo/$path/$number")
 _DEPENDENCIES_PATH_TEMPLATE = Template(
     "/api/v1/repos/$owner/$repo/issues/$number/dependencies"
 )
-_MENTION_PATTERN = re.compile(r"(?:^|\W)@([A-Za-z0-9._-]+)(?=\W|$)")
+_MENTION_PATTERN = re.compile(r"(?:^|[^\w`])@([A-Za-z0-9._-]+)(?=\W|$)")
 _CONTEXT_MESSAGE_TEMPLATE = Template(
     """New notification
 Repository: $repo

@@ -192,6 +192,64 @@ def test_handle_notification_marks_thread_read_after_success(
     asyncio.run(run())
 
 
+def test_handle_notification_ignores_backtick_wrapped_mentions(
+    deps: AgentDeps,
+) -> None:
+    async def run() -> None:
+        http = FakeHTTP(
+            subject={
+                "state": "open",
+                "closed_at": None,
+                "user": {"login": "human"},
+                "assignees": [],
+            },
+            comments=[
+                {
+                    "id": 1,
+                    "body": "Please check `@code_agent` as an example.",
+                    "user": {"login": "human"},
+                }
+            ],
+        )
+        agent = PassingAgent()
+
+        await _handle_notification(agent, http, notification(), deps)
+
+        assert http.patches == ["/api/v1/notifications/threads/123"]
+        assert agent.run_deps is None
+
+    asyncio.run(run())
+
+
+def test_handle_notification_ignores_email_like_text(
+    deps: AgentDeps,
+) -> None:
+    async def run() -> None:
+        http = FakeHTTP(
+            subject={
+                "state": "open",
+                "closed_at": None,
+                "user": {"login": "human"},
+                "assignees": [],
+            },
+            comments=[
+                {
+                    "id": 1,
+                    "body": "Contact foo@bar for details.",
+                    "user": {"login": "human"},
+                }
+            ],
+        )
+        agent = PassingAgent()
+
+        await _handle_notification(agent, http, notification(), deps)
+
+        assert http.patches == ["/api/v1/notifications/threads/123"]
+        assert agent.run_deps is None
+
+    asyncio.run(run())
+
+
 def test_handle_notification_marks_thread_read_when_last_comment_mentions_agent(
     deps: AgentDeps,
 ) -> None:
