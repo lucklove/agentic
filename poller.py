@@ -111,7 +111,9 @@ def _comment_id(comment: dict[str, Any]) -> int:
     return int(comment.get("id") or 0)
 
 
-def _latest_seen_comment_id(comments: list[dict[str, Any]], agent_name: str) -> int:
+def _latest_delivered_comment_id(
+    comments: list[dict[str, Any]], agent_name: str
+) -> int:
     for comment in reversed(comments):
         if _comment_author(comment) != agent_name:
             continue
@@ -140,25 +142,27 @@ def _mentions_agent(comment: dict[str, Any], agent_name: str) -> bool:
     return agent_name in _mentioned_users(comment.get("body") or "")
 
 
-def _mentioned_comment_ids_message(
+def _format_mentioned_comments_message(
     notif_ctx: NotificationContext,
-    last_seen_comment_id: int,
+    comments: list[dict[str, Any]],
 ) -> str:
-    type_label = "issue" if notif_ctx.subject_type == "Issue" else "pull request"
-    return (
-        f"Someone mentioned you in {type_label} "
-        f"{notif_ctx.repo_full_name}#{notif_ctx.number}. "
-        f"Your last seen comment id is {last_seen_comment_id}. "
-        "Read the current comments and consider comments with "
-        f"id > {last_seen_comment_id}.\n\n"
-        "Example:\n"
-        'filter(lambda m: m["id"] > '
-        f"{last_seen_comment_id}, "
-        'await gitea_issue_read(method="get_comments", ...))'
-    )
+    type_label = "issue" if notif_ctx.subject_type == "Issue" else "PR"
+    parts = [
+        f"Someone mentioned you in {notif_ctx.repo_full_name} "
+        f"{type_label} #{notif_ctx.number}"
+    ]
+
+    for comment in comments:
+        author = _comment_author(comment) or "unknown"
+        parts.append(
+            f"======== comment id: {_comment_id(comment)}, from @{author} ========"
+        )
+        parts.append(comment.get("body", ""))
+
+    return "\n\n".join(parts)
 
 
-def _self_marker_messages_after(
+def _chat_messages_after(
     comments: list[dict[str, Any]],
     last_seen_comment_id: int,
     agent_name: str,
@@ -169,6 +173,58 @@ def _self_marker_messages_after(
         if _comment_author(comment) != agent_name
         and is_conversation_comment(comment.get("body", ""), agent_name)
     ]
+
+
+def _mentioned_comments_after(
+    comments: list[dict[str, Any]],
+    last_seen_comment_id: int,
+    agent_name: str,
+) -> list[dict[str, Any]]:
+    return [
+        comment
+        for comment in _comments_after(comments, last_seen_comment_id)
+        if not is_conversation_comment(comment.get("body", ""), agent_name)
+        and _mentions_agent(comment, agent_name)
+    ]
+
+
+def _build_input_message(
+    notif_ctx: NotificationContext,
+    comments: list[dict[str, Any]],
+    last_seen_comment_id: int,
+    agent_name: str,
+) -> tuple[str | None, int]:
+    chat_messages = _chat_messages_after(comments, last_seen_comment_id, agent_name)
+    mentioned_comments = _mentioned_comments_after(
+        comments,
+        last_seen_comment_id,
+        agent_name,
+    )
+
+    message_parts: list[str] = []
+    delivered_comment_ids: list[int] = []
+
+    if chat_messages:
+        message_parts.append("\n\n".join(chat_messages))
+        delivered_comment_ids.extend(
+            _comment_id(comment)
+            for comment in _comments_after(comments, last_seen_comment_id)
+            if _comment_author(comment) != agent_name
+            and is_conversation_comment(comment.get("body", ""), agent_name)
+        )
+
+    if mentioned_comments:
+        message_parts.append(
+            _format_mentioned_comments_message(notif_ctx, mentioned_comments)
+        )
+        delivered_comment_ids.extend(
+            _comment_id(comment) for comment in mentioned_comments
+        )
+
+    if not delivered_comment_ids:
+        return None, last_seen_comment_id
+
+    return "\n\n".join(message_parts), max(delivered_comment_ids)
 
 
 def _notification_span_name(
@@ -330,23 +386,18 @@ async def _handle_notification(
             )
         else:
             comments = await notif_ctx.get_subject_comments()
-            last_seen_comment_id = _latest_seen_comment_id(
+            last_seen_comment_id = _latest_delivered_comment_id(
                 comments,
                 deps.gitea_username,
             )
-            new_comments = _comments_after(comments, last_seen_comment_id)
-            self_marker_messages = _self_marker_messages_after(
+            input_message, max_delivered_comment_id = _build_input_message(
+                notif_ctx,
                 comments,
                 last_seen_comment_id,
                 deps.gitea_username,
             )
-            mentioned_comment_ids = [
-                _comment_id(comment)
-                for comment in new_comments
-                if _mentions_agent(comment, deps.gitea_username)
-            ]
 
-            if not self_marker_messages and not mentioned_comment_ids:
+            if input_message is None:
                 logfire.info(
                     "skip notification unrelated to agent",
                     repo=notif_ctx.repo_full_name,
@@ -366,15 +417,6 @@ async def _handle_notification(
                 ),
                 last_seen_comment_id=last_seen_comment_id,
             )
-
-            # Determine the input message.
-            if self_marker_messages:
-                input_message = "\n\n".join(self_marker_messages)
-            else:
-                input_message = _mentioned_comment_ids_message(
-                    notif_ctx,
-                    last_seen_comment_id,
-                )
 
             # Load message history.
             history: list[Any] = []
@@ -401,7 +443,7 @@ async def _handle_notification(
 
             # Post agent output as a comment with conversation marker.
             comment_body = (
-                f"{marker_for(deps.gitea_username, run_deps.last_seen_comment_id)}"
+                f"{marker_for(deps.gitea_username, max_delivered_comment_id)}"
                 f"\n\n{result.output}"
             )
             await http.post(

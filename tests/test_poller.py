@@ -320,9 +320,11 @@ def test_handle_notification_uses_unseen_mention_not_last_comment(
         assert agent.run_deps is not None
         assert agent.run_deps.last_seen_comment_id == 0
         assert agent.run_message is not None
-        assert "Your last seen comment id is 0" in agent.run_message
-        assert "id > 0" in agent.run_message
-        assert 'filter(lambda m: m["id"] > 0' in agent.run_message
+        assert (
+            "Someone mentioned you in autonomous/agentic issue #31" in agent.run_message
+        )
+        assert "======== comment id: 2, from @human ========" in agent.run_message
+        assert "Please take a look @code_agent" in agent.run_message
 
     asyncio.run(run())
 
@@ -568,7 +570,7 @@ def test_handle_notification_conversation_marker_uses_body_as_input(
         # Auto-post still happens unconditionally
         assert len(http.posts) == 1
         assert http.posts[0][1]["body"].startswith(
-            "<!-- agentic:@code_agent last_seen_comment_id=0 -->"
+            "<!-- agentic:@code_agent last_seen_comment_id=1 -->"
         )
 
     asyncio.run(run())
@@ -619,7 +621,7 @@ def test_handle_notification_auto_posts_comment_with_marker(
         path, body = http.posts[0]
         assert path.endswith("/issues/31/comments")
         assert body["body"].startswith(
-            "<!-- agentic:@code_agent last_seen_comment_id=0 -->"
+            "<!-- agentic:@code_agent last_seen_comment_id=1 -->"
         )
         assert "done" in body["body"]
 
@@ -765,6 +767,132 @@ def test_handle_notification_excludes_agent_own_marker_from_input_message(
         assert agent.run_message == (
             "<!-- agentic:@code_agent last_seen_comment_id=1 -->\n\nsecond reply from human"
         )
+        assert http.posts[0][1]["body"].startswith(
+            "<!-- agentic:@code_agent last_seen_comment_id=3 -->"
+        )
+
+    asyncio.run(run())
+
+
+def test_handle_notification_merges_chat_then_mentions_into_one_message(
+    deps: AgentDeps,
+) -> None:
+    async def run() -> None:
+        http = FakeHTTP(
+            subject={
+                "state": "open",
+                "closed_at": None,
+                "user": {"login": "human"},
+                "assignees": [],
+            },
+            comments=[
+                {
+                    "id": 1,
+                    "body": "<!-- agentic:@code_agent last_seen_comment_id=0 -->\n\nchat 1",
+                    "user": {"login": "human"},
+                },
+                {
+                    "id": 2,
+                    "body": "<!-- agentic:@code_agent last_seen_comment_id=0 -->\n\nchat 2 @code_agent",
+                    "user": {"login": "human"},
+                },
+                {
+                    "id": 3,
+                    "body": "Please handle this @code_agent",
+                    "user": {"login": "agent_a"},
+                },
+                {
+                    "id": 4,
+                    "body": "Following up for @code_agent",
+                    "user": {"login": "agent_b"},
+                },
+            ],
+        )
+        agent = PassingAgent()
+
+        await _handle_notification(agent, http, notification(), deps)
+
+        assert agent.run_message == (
+            "<!-- agentic:@code_agent last_seen_comment_id=0 -->\n\nchat 1\n\n"
+            "<!-- agentic:@code_agent last_seen_comment_id=0 -->\n\nchat 2 @code_agent\n\n"
+            "Someone mentioned you in autonomous/agentic issue #31\n\n"
+            "======== comment id: 3, from @agent_a ========\n\n"
+            "Please handle this @code_agent\n\n"
+            "======== comment id: 4, from @agent_b ========\n\n"
+            "Following up for @code_agent"
+        )
+        assert http.posts[0][1]["body"].startswith(
+            "<!-- agentic:@code_agent last_seen_comment_id=4 -->"
+        )
+
+    asyncio.run(run())
+
+
+def test_handle_notification_chat_comment_with_mention_is_not_duplicated(
+    deps: AgentDeps,
+) -> None:
+    chat_body = "<!-- agentic:@code_agent last_seen_comment_id=0 -->\n\nplease continue @code_agent"
+
+    async def run() -> None:
+        http = FakeHTTP(
+            subject={
+                "state": "open",
+                "closed_at": None,
+                "user": {"login": "human"},
+                "assignees": [],
+            },
+            comments=[
+                {
+                    "id": 1,
+                    "body": chat_body,
+                    "user": {"login": "human"},
+                }
+            ],
+        )
+        agent = PassingAgent()
+
+        await _handle_notification(agent, http, notification(), deps)
+
+        assert agent.run_message == chat_body
+        assert agent.run_message.count("please continue @code_agent") == 1
+        assert (
+            "Someone mentioned you in autonomous/agentic issue #31"
+            not in agent.run_message
+        )
+        assert http.posts[0][1]["body"].startswith(
+            "<!-- agentic:@code_agent last_seen_comment_id=1 -->"
+        )
+
+    asyncio.run(run())
+
+
+def test_handle_notification_formats_pull_mentions_as_pr(
+    deps: AgentDeps,
+) -> None:
+    async def run() -> None:
+        http = FakeHTTP(
+            subject={
+                "state": "open",
+                "closed_at": None,
+                "user": {"login": "human"},
+                "assignees": [],
+                "requested_reviewers": [],
+                "reviewers": [],
+            },
+            comments=[
+                {
+                    "id": 1,
+                    "body": "Can you review this? @code_agent",
+                    "user": {"login": "human"},
+                }
+            ],
+        )
+        agent = PassingAgent()
+
+        await _handle_notification(agent, http, notification("Pull"), deps)
+
+        assert agent.run_message is not None
+        assert "Someone mentioned you in autonomous/agentic PR #31" in agent.run_message
 
     asyncio.run(run())
 

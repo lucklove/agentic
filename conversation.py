@@ -7,7 +7,8 @@ Agent comments on issue/pr threads start with a hidden HTML marker::
     <!-- agentic:@<agent-name> -->
 
 This marker lets the poller and tool layer distinguish "conversation-type"
-comments (Web UI dialogue) from regular context comments.
+comments (Web UI dialogue) from regular context comments, and persist the
+highest comment id the poller has already delivered to the agent.
 """
 
 from __future__ import annotations
@@ -57,7 +58,7 @@ def is_conversation_comment(body: str, agent_name: str) -> bool:
 
 
 def last_seen_comment_id_from_marker(body: str, agent_name: str) -> int | None:
-    """Return the marker's last-seen comment id, if present."""
+    """Return the marker's delivered comment watermark, if present."""
     match = _marker_pattern(agent_name).search(body or "")
     if match is None:
         return None
