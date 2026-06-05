@@ -10,7 +10,7 @@ from deps import AgentDeps
 from poller import (
     _build_context_message,
     _handle_notification,
-    _latest_seen_comment_id,
+    _latest_delivered_comment_id,
     _notification_span_name,
 )
 
@@ -318,7 +318,6 @@ def test_handle_notification_uses_unseen_mention_not_last_comment(
         await _handle_notification(agent, http, notification(), deps)
 
         assert agent.run_deps is not None
-        assert agent.run_deps.last_seen_comment_id == 0
         assert agent.run_message is not None
         assert (
             "Someone mentioned you in autonomous/agentic issue #31" in agent.run_message
@@ -897,7 +896,7 @@ def test_handle_notification_formats_pull_mentions_as_pr(
     asyncio.run(run())
 
 
-def test_latest_seen_comment_id_ignores_marker_from_other_authors() -> None:
+def test_latest_delivered_comment_id_ignores_marker_from_other_authors() -> None:
     comments = [
         {
             "id": 2,
@@ -911,4 +910,4 @@ def test_latest_seen_comment_id_ignores_marker_from_other_authors() -> None:
         },
     ]
 
-    assert _latest_seen_comment_id(comments, "code_agent") == 1
+    assert _latest_delivered_comment_id(comments, "code_agent") == 1

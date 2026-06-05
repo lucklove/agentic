@@ -415,7 +415,6 @@ async def _handle_notification(
                     number=notif_ctx.number,
                     subject_type=notif_ctx.subject_type,
                 ),
-                last_seen_comment_id=last_seen_comment_id,
             )
 
             # Load message history.

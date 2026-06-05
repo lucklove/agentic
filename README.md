@@ -40,7 +40,7 @@ Notification threads are marked read only after they are successfully handled or
 
 ## Conversation via Web UI Comments
 
-Issue/PR comments serve as the Web UI conversation channel between humans and agents. Agent comments start with `<!-- agentic:@<agent-name> -->`. Conversation-type comments (those containing the marker) are:
+Issue/PR comments serve as the Web UI conversation channel between humans and agents. Agent comments start with `<!-- agentic:@<agent-name> last_seen_comment_id=<n> -->`, where the marker records the highest comment id already delivered back into the agent conversation. Conversation-type comments (those containing the marker) are:
 
 - Used directly as `agent.run()` input when they are the last comment
 - Filtered out from `gitea_*` tool reads to avoid double-injection

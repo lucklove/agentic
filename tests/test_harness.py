@@ -207,7 +207,6 @@ def test_after_tool_execute_filters_conversation_comments() -> None:
     assert len(filtered) == 2
     assert filtered[0]["body"] == "Regular comment"
     assert filtered[1]["body"] == "Another comment"
-    assert ctx.deps.last_seen_comment_id == 3
 
 
 def test_after_tool_execute_passes_through_non_list_result() -> None:

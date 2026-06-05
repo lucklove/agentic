@@ -120,7 +120,4 @@ class HarnessCapability(AbstractCapability[AgentDeps]):
         if not agent_name:
             return result
 
-        if result:
-            ctx.deps.last_seen_comment_id = int(result[-1].get("id", 0))
-
         return visible_comments(result, agent_name)
