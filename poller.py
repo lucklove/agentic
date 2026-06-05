@@ -113,6 +113,9 @@ def _comment_id(comment: dict[str, Any]) -> int:
 
 def _latest_seen_comment_id(comments: list[dict[str, Any]], agent_name: str) -> int:
     for comment in reversed(comments):
+        if _comment_author(comment) != agent_name:
+            continue
+
         seen_id = last_seen_comment_id_from_marker(
             comment.get("body", ""),
             agent_name,
