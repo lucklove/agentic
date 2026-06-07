@@ -1,9 +1,9 @@
 # agentic
 
-- `main.py` is the only entrypoint. It loads `agentic.yaml`, discovers profiles from `~/.agentic/*/profile.yaml`, resolves each profile's Gitea username via `GET /api/v1/user`, then either polls forever or runs the one-shot `--instruction` path.
+- `main.py` is the only entrypoint. It loads `~/.agentic/agentic.yaml`, discovers profiles from `~/.agentic/*/profile.yaml`, resolves each profile's Gitea username via `GET /api/v1/user`, then either polls forever or runs the one-shot `--instruction` path.
 - Runtime deps are not managed by `pyproject.toml`; the source of truth is the PEP 723 dependency block at the top of `main.py`. If a runtime package changes, update that block, not `Makefile`.
 - `Makefile` derives `uv run --with ...` flags by parsing `main.py`, so `make test` / `make typecheck` only see dependencies declared there.
-- `agentic.yaml` global capability configs are replaced wholesale by same-named profile capability entries; capability options are not recursively merged.
+- `~/.agentic/agentic.yaml` global capability configs are replaced wholesale by same-named profile capability entries; capability options are not recursively merged.
 - Profile instruction templating uses `string.Template.safe_substitute`, so profiles must use `$gitea_username`. `${gitea_username}` also works; bare `{gitea_username}` does not.
 - Relative `working_dir` values are resolved from this directory (`main.py`'s directory), not from the profile directory.
 - Per-profile persistent state lives under `~/.agentic/<profile>/`. The default file-backed memory path is `~/.agentic/<profile>/memory.json`; setting a relative `capabilities.memory.path` writes relative to the process cwd instead.

@@ -22,7 +22,7 @@ REMOTE_LINE_RE = re.compile(
 )
 SSH_GITHUB_REMOTE_RE = re.compile(r"^[^@\s]+@github\.com:")
 ROOT_DIR = Path(__file__).resolve().parents[3]
-DEFAULT_GLOBAL_CONFIG = ROOT_DIR / "agentic.yaml"
+DEFAULT_GLOBAL_CONFIG = Path.home() / ".agentic" / "agentic.yaml"
 DEFAULT_AGENTIC_DIR = Path.home() / ".agentic"
 
 

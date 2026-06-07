@@ -94,12 +94,13 @@ def test_discover_github_url_requires_github_remote(
 
 
 def test_discover_gitea_url_reads_configs(tmp_path: Path) -> None:
-    global_config = tmp_path / "agentic.yaml"
+    agentic_dir = tmp_path / ".agentic"
+    agentic_dir.mkdir()
+    global_config = agentic_dir / "agentic.yaml"
     global_config.write_text("""
 gitea:
   base_url: http://gitea.ai
 """)
-    agentic_dir = tmp_path / ".agentic"
     profile_dir = agentic_dir / "ops_agent"
     profile_dir.mkdir(parents=True)
     (profile_dir / "profile.yaml").write_text("""

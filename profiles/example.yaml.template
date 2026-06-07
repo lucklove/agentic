@@ -12,7 +12,7 @@ gitea:
   token: "YOUR_GITEA_TOKEN"
 
 # Optional working directory override for tool/command execution. Relative paths
-# are resolved from the main.py directory. Defaults to agentic.yaml working_dir.
+# are resolved from the main.py directory. Defaults to ~/.agentic/agentic.yaml working_dir.
 # working_dir: "."
 
 instructions: |
@@ -28,7 +28,7 @@ instructions: |
     repository's `worktrees/` directory instead of directly under the repo
     root.
 
-# Profile capability entries are merged with agentic.yaml capabilities by name.
+# Profile capability entries are merged with ~/.agentic/agentic.yaml capabilities by name.
 # If the same capability appears in both places, this profile entry replaces
 # the complete global capability config; subfields are not merged recursively.
 capabilities:

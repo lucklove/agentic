@@ -132,7 +132,7 @@ values, and any required environment variables.
 ## Step 6 - Create the Files
 
 When editing this repository, create the skill under the configured skills
-directory from `agentic.yaml`:
+directory from `~/.agentic/agentic.yaml`:
 
 ```yaml
 skills_dir: "./skills"

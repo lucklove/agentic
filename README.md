@@ -20,9 +20,9 @@ There is no `pyproject.toml`; runtime dependencies and Python `>=3.14` live in t
 
 ## Configuration
 
-`agentic.yaml` is global Gitea/MCP/skills config. Per-agent config lives at `~/.agentic/<profile>/profile.yaml`. Keep shared examples in `profiles/example.yaml.template`.
+`~/.agentic/agentic.yaml` is global Gitea/MCP/skills config. Per-agent config lives at `~/.agentic/<profile>/profile.yaml`. Keep shared examples in `profiles/example.yaml.template`.
 
-`working_dir` controls the `LocalBackend` cwd used by command/code execution. It defaults to `.` in `agentic.yaml` (the `main.py` directory), and can be overridden per profile with `working_dir` in `~/.agentic/<profile>/profile.yaml`. Relative paths are resolved from the `main.py` directory.
+`working_dir` controls the `LocalBackend` cwd used by command/code execution. It defaults to `.` in `~/.agentic/agentic.yaml` (the `main.py` directory), and can be overridden per profile with `working_dir` in `~/.agentic/<profile>/profile.yaml`. Relative paths are resolved from the `main.py` directory.
 
 Profile `model` values use explicit `<kind>:<name>` strings. Supported kinds are currently `openai-chat`, `openai-responses`, and `anthropic`.
 
@@ -32,7 +32,7 @@ Profile instruction templating uses `string.Template.safe_substitute`; use `$git
 
 ## Runtime Flow
 
-`main.py` loads `agentic.yaml`, loads each requested profile, resolves the token's Gitea login with `GET /api/v1/user`, builds an agent, then either starts `poll_forever` or runs the direct `--instruction` path.
+`main.py` loads `~/.agentic/agentic.yaml`, loads each requested profile, resolves the token's Gitea login with `GET /api/v1/user`, builds an agent, then either starts `poll_forever` or runs the direct `--instruction` path.
 
 Polling opens `async with agent` once per profile, which starts profile-scoped capability lifecycles such as the Gitea MCP subprocess. A poll reads unread notifications, keeps only `Issue` and `Pull`, skips closed or dependency-blocked subjects, then checks whether the last issue comment mentions the current agent or whether the agent is otherwise relevant by role before calling `agent.run(...)`.
 
@@ -50,7 +50,7 @@ After every `agent.run()`, the output is automatically posted as a comment with 
 
 ## Capabilities
 
-`agentic.yaml` can define global capabilities that are enabled for all profiles; by default it enables `code_exec`, `gitea`, `harness`, privacy redaction, and model compaction. Profile capability entries are merged by name and replace same-named global entries completely; capability options are not recursively merged.
+`~/.agentic/agentic.yaml` can define global capabilities that are enabled for all profiles; by default it enables `code_exec`, `gitea`, `harness`, privacy redaction, and model compaction. Profile capability entries are merged by name and replace same-named global entries completely; capability options are not recursively merged.
 
 Configurable capability keys are `code_exec`, `gitea`, `filesystem`, `skills`, `memory`, `harness`, `privacy`, `openai_compaction`, and `anthropic_compaction`. Unknown capability keys are silently ignored by the registry comprehension in `agent_factory.py`.
 

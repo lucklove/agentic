@@ -11,7 +11,7 @@ every capability can define its own option schema.
 
 Adding a new capability means adding one entry to the registry —
 no ``if`` chains needed anywhere. ``code_exec`` is the registry name for
-``CodeMode`` and is enabled by default through ``agentic.yaml``.
+``CodeMode`` and is enabled by default through ``~/.agentic/agentic.yaml``.
 """
 
 from __future__ import annotations

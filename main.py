@@ -17,7 +17,7 @@ Usage:
     uv run main.py <profile-name> [<profile-name> ...]
     uv run main.py <profile-name> --instruction "..."
 
-Loads ``agentic.yaml`` (global config) and profile files from
+Loads ``~/.agentic/agentic.yaml`` (global config) and profile files from
 ``~/.agentic/<profile-name>/profile.yaml``. With no profile names, every
 discoverable profile is loaded.
 By default, each profile starts its own notification polling loop.  With
@@ -44,6 +44,7 @@ from poller import poll_forever
 
 _HERE = Path(__file__).parent
 _AGENTIC_DIR = Path.home() / ".agentic"
+_GLOBAL_CONFIG_PATH = _AGENTIC_DIR / "agentic.yaml"
 
 
 async def _resolve_username(base_url: str, token: str) -> str:
@@ -91,7 +92,7 @@ def _discover_profiles() -> list[str]:
 
 
 async def _build_runtime(profile_name: str) -> AgentRuntime:
-    global_cfg = load_global_config(_HERE / "agentic.yaml")
+    global_cfg = load_global_config(_GLOBAL_CONFIG_PATH)
     profile = load_profile(_profile_path(profile_name))
     username = await _resolve_username(global_cfg.gitea.base_url, profile.gitea.token)
     working_dir = _resolve_path(profile.working_dir or global_cfg.working_dir)

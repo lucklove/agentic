@@ -2,7 +2,7 @@
 
 Two config layers:
 
-  GlobalConfig   — loaded from ``agentic.yaml`` (shared across all profiles)
+  GlobalConfig   — loaded from ``~/.agentic/agentic.yaml`` (shared across all profiles)
   ProfileConfig  — loaded from ``~/.agentic/<name>/profile.yaml`` (per-agent settings)
 """
 
@@ -53,7 +53,7 @@ def _normalize_capabilities(
     return {k: (v or {}) for k, v in (raw_caps or {}).items()}
 
 
-def load_global_config(path: str | Path = "agentic.yaml") -> GlobalConfig:
+def load_global_config(path: str | Path) -> GlobalConfig:
     with open(path) as f:
         data: dict[str, Any] = yaml.safe_load(f)
 

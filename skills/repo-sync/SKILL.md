@@ -33,7 +33,7 @@ Arguments:
   the script reads `git remote -v` and uses the GitHub fetch remote, preferring
   `origin` when multiple GitHub remotes exist.
 - `--gitea-url`: optional override for the Gitea repository URL. If omitted,
-  the script reads `agentic.yaml` for `gitea.base_url`, reads the Gitea token
+  the script reads `~/.agentic/agentic.yaml` for `gitea.base_url`, reads the Gitea token
   from the selected profile, and builds the target repository URL from
   `--owner/--repo`.
 - `--main-branch`: main branch name; defaults to `main`.
