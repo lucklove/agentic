@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from pydantic_ai import Agent
 from pydantic_ai.messages import (
     ModelRequest,
@@ -145,6 +146,48 @@ def test_excluded_values_are_not_redacted() -> None:
     )
 
     assert cap.redact_text("use my-api-key-123") == "use my-api-key-123"
+
+
+def test_string_keyword_entries_raise_error() -> None:
+    with pytest.raises(
+        ValueError, match=r"privacy\.patterns\.keywords\[0\] must be a mapping"
+    ):
+        PrivacyCapability.from_spec({"patterns": {"keywords": ["my-api-key-123"]}})
+
+
+def test_non_mapping_regex_entries_raise_error() -> None:
+    with pytest.raises(
+        ValueError, match=r"privacy\.patterns\.regex\[0\] must be a mapping"
+    ):
+        PrivacyCapability.from_spec({"patterns": {"regex": ["token-[a-z]+"]}})
+
+
+def test_non_string_builtin_entries_raise_error() -> None:
+    with pytest.raises(
+        ValueError, match=r"privacy\.patterns\.builtin\[0\] must be a string"
+    ):
+        PrivacyCapability.from_spec({"patterns": {"builtin": [{"name": "email"}]}})
+
+
+def test_unknown_builtin_entries_raise_error() -> None:
+    with pytest.raises(
+        ValueError, match=r"privacy\.patterns\.builtin\[0\] references unknown builtin"
+    ):
+        PrivacyCapability.from_spec({"patterns": {"builtin": ["not-a-builtin"]}})
+
+
+def test_non_string_exclude_entries_raise_error() -> None:
+    with pytest.raises(
+        ValueError, match=r"privacy\.patterns\.exclude\[0\] must be a string"
+    ):
+        PrivacyCapability.from_spec(
+            {"patterns": {"exclude": [{"value": "example.com"}]}}
+        )
+
+
+def test_non_list_pattern_sections_raise_error() -> None:
+    with pytest.raises(ValueError, match=r"privacy\.patterns\.keywords must be a list"):
+        PrivacyCapability.from_spec({"patterns": {"keywords": {"value": "secret"}}})
 
 
 def test_disabled_capability_does_not_redact() -> None:

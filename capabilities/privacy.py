@@ -85,6 +85,35 @@ def _compile_flags(flags: str) -> int:
     return compiled
 
 
+def _require_list(spec: dict[str, Any], key: str) -> list[Any]:
+    value = spec.get(key, [])
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    raise ValueError(f"privacy.patterns.{key} must be a list")
+
+
+def _require_dict_item(item: Any, key: str, index: int) -> dict[str, Any]:
+    if isinstance(item, dict):
+        return item
+    raise ValueError(
+        f"privacy.patterns.{key}[{index}] must be a mapping, got {type(item).__name__}"
+    )
+
+
+def _require_string_list(spec: dict[str, Any], key: str) -> list[str]:
+    items = _require_list(spec, key)
+    values: list[str] = []
+    for index, item in enumerate(items):
+        if not isinstance(item, str):
+            raise ValueError(
+                f"privacy.patterns.{key}[{index}] must be a string, got {type(item).__name__}"
+            )
+        values.append(item)
+    return values
+
+
 def _parse_ttl(value: Any) -> timedelta | None:
     if value is None:
         return timedelta(hours=1)
@@ -124,34 +153,34 @@ class _PatternSet:
     def from_spec(cls, spec: dict[str, Any] | None) -> _PatternSet:
         spec = spec or {}
         keywords = []
-        for item in spec.get("keywords", []):
-            if not isinstance(item, dict):
-                continue
-            value = str(item.get("value", "")).strip()
+        for index, item in enumerate(_require_list(spec, "keywords")):
+            mapping = _require_dict_item(item, "keywords", index)
+            value = str(mapping.get("value", "")).strip()
             if value:
                 keywords.append(
-                    _KeywordRule(value, _sanitize_category(item.get("category")))
+                    _KeywordRule(value, _sanitize_category(mapping.get("category")))
                 )
 
         regex_rules = []
-        for item in spec.get("regex", []):
-            if not isinstance(item, dict):
-                continue
-            pattern = str(item.get("pattern", "")).strip()
+        for index, item in enumerate(_require_list(spec, "regex")):
+            mapping = _require_dict_item(item, "regex", index)
+            pattern = str(mapping.get("pattern", "")).strip()
             if not pattern:
                 continue
-            flags = str(item.get("flags", ""))
+            flags = str(mapping.get("flags", ""))
             regex_rules.append(
                 _RegexRule(
                     re.compile(pattern, _compile_flags(flags)),
-                    _sanitize_category(item.get("category")),
+                    _sanitize_category(mapping.get("category")),
                 )
             )
 
-        for name in spec.get("builtin", []):
-            builtin = _BUILTIN_PATTERNS.get(str(name).strip())
+        for index, name in enumerate(_require_string_list(spec, "builtin")):
+            builtin = _BUILTIN_PATTERNS.get(name.strip())
             if builtin is None:
-                continue
+                raise ValueError(
+                    f"privacy.patterns.builtin[{index}] references unknown builtin {name!r}"
+                )
             pattern, flags, category = builtin
             regex_rules.append(
                 _RegexRule(re.compile(pattern, _compile_flags(flags)), category)
@@ -160,7 +189,7 @@ class _PatternSet:
         return cls(
             keywords=keywords,
             regex=regex_rules,
-            exclude={str(item) for item in spec.get("exclude", [])},
+            exclude=set(_require_string_list(spec, "exclude")),
         )
 
 
