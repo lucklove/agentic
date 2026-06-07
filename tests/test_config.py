@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 from config import load_global_config, load_profile
@@ -68,3 +70,47 @@ instructions: test
     profile = load_profile(path)
 
     assert profile.working_dir == "./profile-workspace"
+
+
+def test_main_help_includes_config_and_profiles_root_flags() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+
+    result = subprocess.run(
+        [sys.executable, "main.py", "--help"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert "--config CONFIG" in result.stdout
+    assert "--profiles-root PROFILES_ROOT" in result.stdout
+
+
+def test_main_reports_missing_profiles_root(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    config_path = tmp_path / "agentic.yaml"
+    config_path.write_text("""
+gitea:
+  base_url: http://gitea.example
+""")
+    missing_profiles_root = tmp_path / "profiles"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "main.py",
+            "--config",
+            str(config_path),
+            "--profiles-root",
+            str(missing_profiles_root),
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert (
+        f"profiles root directory not found: {missing_profiles_root}" in result.stderr
+    )

@@ -8,6 +8,8 @@ Gitea-notification-driven agent runner. Each profile in `~/.agentic/<profile>/pr
 uv run main.py                                        # poll every ~/.agentic/*/profile.yaml
 uv run main.py <profile-name> [<profile-name> ...]  # poll one or more profiles concurrently
 uv run main.py <profile-name> -i "instruction"      # run one profile once, print model output, do not poll
+uv run main.py --config /path/to/agentic.yaml       # override the global config file path
+uv run main.py --profiles-root /path/to/profiles    # override the root containing named profile subdirectories
 uv run main.py --help                               # verify CLI shape after entrypoint edits
 uv run python -m py_compile main.py                 # focused syntax check
 make check                                          # flake8 via uvx
@@ -20,13 +22,13 @@ There is no `pyproject.toml`; runtime dependencies and Python `>=3.14` live in t
 
 ## Configuration
 
-`~/.agentic/agentic.yaml` is global Gitea/MCP/skills config. Per-agent config lives at `~/.agentic/<profile>/profile.yaml`. Keep shared examples in `profiles/example.yaml.template`.
+`~/.agentic/agentic.yaml` is the default global Gitea/MCP/skills config. Per-agent config lives at `~/.agentic/<profile>/profile.yaml` by default. You can override these locations with `--config /path/to/agentic.yaml` and `--profiles-root /path/to/profiles`, where the profiles root is the directory containing named profile subdirectories. Keep shared examples in `profiles/example.yaml.template`.
 
 `working_dir` controls the `LocalBackend` cwd used by command/code execution. It defaults to `.` in `~/.agentic/agentic.yaml` (the `main.py` directory), and can be overridden per profile with `working_dir` in `~/.agentic/<profile>/profile.yaml`. Relative paths are resolved from the `main.py` directory.
 
 Profile `model` values use explicit `<kind>:<name>` strings. Supported kinds are currently `openai-chat`, `openai-responses`, and `anthropic`.
 
-With no profile arguments, `main.py` scans `~/.agentic/*/profile.yaml`, sorted by directory name.
+With no profile arguments, `main.py` scans `<profiles-root>/*/profile.yaml`, sorted by directory name. The default profiles root is `~/.agentic`.
 
 Profile instruction templating uses `string.Template.safe_substitute`; use `$gitea_username` for substitution. Brace form `{gitea_username}` is not substituted by current code.
 
