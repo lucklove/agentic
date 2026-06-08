@@ -168,3 +168,38 @@ def test_registry_uses_global_skills_when_profile_skills_dirs_empty() -> None:
     assert [skill.name for skill in captured] == ["global-only"]
     assert [skill.name for skill in capability.skills] == ["global-only"]
     discover_skills.assert_called_once_with(str(Path("/global-skills").resolve()))
+
+
+def test_registry_resolves_relative_global_skills_dir_from_agent_factory_directory() -> (
+    None
+):
+    global_cfg = GlobalConfig(
+        gitea=GiteaGlobalConfig(base_url="http://gitea.example", mcp_command=[]),
+        skills_dir="./skills",
+    )
+    profile = ProfileConfig(
+        model="openai-responses:gpt-5.5",
+        model_settings={},
+        gitea=GiteaProfileConfig(token="token"),
+        instructions="test",
+    )
+
+    base_dir = Path("/repo/subdir")
+    expected_skills_dir = str((base_dir / "skills").resolve())
+
+    with patch(
+        "agent_factory.discover_skills",
+        return_value=[SimpleNamespace(name="global-only")],
+    ) as discover_skills, patch(
+        "agent_factory.SkillsCapability",
+        side_effect=lambda *, skills: SimpleNamespace(skills=skills),
+    ):
+        _build_registry(
+            global_cfg,
+            profile,
+            global_skills_dir_base=base_dir,
+        )[
+            "skills"
+        ]({})
+
+    discover_skills.assert_called_once_with(expected_skills_dir)
