@@ -40,7 +40,7 @@ capabilities:
     #   - gitea_actions_config_write
     # deny:
     #   - gitea_actions_config_write
-  filesystem:
+  console:
     include_execute: true
   skills:
     # allow:

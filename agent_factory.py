@@ -24,11 +24,12 @@ from pydantic_ai import Agent, AgentRetries, ModelSettings
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.models.anthropic import AnthropicCompaction
 from pydantic_ai.models.openai import OpenAICompaction
+from pydantic_ai_backends import ConsoleCapability
+from pydantic_ai_backends.permissions.presets import PERMISSIVE_RULESET
 from pydantic_ai_harness import CodeMode
 from pydantic_ai_skills import SkillsCapability, discover_skills
 
 from capabilities.base import make_name_filter
-from capabilities.filesystem import make_fs_capability
 from capabilities.gitea import make_gitea_capability
 from capabilities.harness import HarnessCapability
 from capabilities.memory import Memory
@@ -96,8 +97,9 @@ def _build_registry(
             token=profile.gitea.token,
             opts=opts,
         ),
-        "filesystem": lambda opts: make_fs_capability(
+        "console": lambda opts: ConsoleCapability(
             include_execute=opts.get("include_execute", False),
+            permissions=PERMISSIVE_RULESET,
         ),
         "skills": lambda opts: _make_skills_capability(skills_dirs, opts),
         "memory": lambda opts: Memory.from_spec(

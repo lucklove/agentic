@@ -30,29 +30,8 @@ def test_instructions_include_shared_rules() -> None:
     instructions = HarnessCapability().get_instructions()
 
     assert "Harness Rules" in instructions
-    assert "automatically posted as a Gitea issue/PR comment" in instructions
-    assert "do not use `gitea_*` tools to post a normal reply/comment" in instructions
-    assert "must @mention at least one person other than yourself" in instructions
-    assert "your final response may @mention people" in instructions
-    assert (
-        "if you need to reply to a specific person, @mention them in your final response"
-        in instructions
-    )
+    assert "use gitea_issue_write to leave a comment with @someone" in instructions
     assert "wrap it in backticks like `@someone`" in instructions
-    assert "Do not react to your own comments" in instructions
-    assert (
-        "Read the full relevant issue or pull request context before acting."
-        in instructions
-    )
-    assert "If checks are pending, wait and poll again" in instructions
-    assert "prefer the `sleep` function" in instructions
-    assert "If a PR is blocked by failing checks or requested changes" in instructions
-    assert "do not treat the inability to request review or merge" in instructions
-    assert "gitea_pull_request_write" in instructions
-    assert '`method: "merge"`' in instructions
-    assert '`merge_style: "squash"`' in instructions
-    assert "`delete_branch: true`" in instructions
-    assert "not associated with an open PR" in instructions
 
 
 def test_get_toolset_exposes_sleep_tool() -> None:

@@ -20,24 +20,8 @@ _MENTION_PATTERN = re.compile(r"(?:^|[^\w`])@[A-Za-z0-9._-]+(?=\W|$)")
 
 _HARNESS_INSTRUCTIONS = """## Harness Rules
 
-- Highest priority:
-   - your final response from each notification run is automatically posted as a Gitea issue/PR comment.
-   - do not use `gitea_*` tools to post a normal reply/comment on the current thread; use your final response for that.
-   - if you use `gitea_*` tools to create a comment, that comment must @mention at least one person other than yourself.
-   - your final response may @mention people, but it is not required to @mention anyone.
-   - if you need to reply to a specific person, @mention them in your final response.
-   - if you want to mention someone without notifying them, wrap it in backticks like `@someone`.
-   - if new messages in the issue or pull request only @mention someone else, do nothing.
-- Do not react to your own comments, except that you are mentioned in the last message.
-- Read the full relevant issue or pull request context before acting.
-- If checks are pending, wait and poll again instead of concluding immediately.
-  When you need to wait briefly before checking again, prefer the `sleep` function.
-- If a PR is blocked by failing checks or requested changes, do the required
-  follow-up work first; do not treat the inability to request review or merge
-  yet as a final blocker by itself.
-- If the work is complete and the subject is a PR that has already been approved, merge it with `gitea_pull_request_write` using `method: "merge"`, `merge_style: "squash"`, and `delete_branch: true`.
-- If the work is complete and the subject is an issue that is not associated with an open PR, and you judge the issue is resolved, close the issue directly.
-- If no action is required, explain why.
+- When you want to notify someone, use gitea_issue_write to leave a comment with @someone.
+- To mention someone without notifying them, wrap it in backticks like `@someone`.
 """
 
 

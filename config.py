@@ -100,7 +100,7 @@ class ProfileConfig:
     model_settings: dict[str, Any] = field(default_factory=dict)
     working_dir: str | None = None
     # Keys are capability names; values are the option dicts from YAML.
-    # e.g. {"filesystem": {"include_execute": false}, "code_exec": {}, "skills": {"names": [...]}}
+    # e.g. {"console": {"include_execute": false}, "code_exec": {}, "skills": {"names": [...]}}
     capabilities: dict[str, dict[str, Any]] = field(default_factory=dict)
     polling: PollingConfig = field(default_factory=PollingConfig)
 
