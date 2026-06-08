@@ -30,7 +30,10 @@ def test_instructions_include_shared_rules() -> None:
     instructions = HarnessCapability().get_instructions()
 
     assert "Harness Rules" in instructions
-    assert "当前是公开的对话，你的回复所有人都能看到" in instructions
+    assert (
+        "This is a public conversation, and everyone can see your replies"
+        in instructions
+    )
     assert "reply a message with @someone" in instructions
     assert "wrap it in backticks like `@someone`" in instructions
 

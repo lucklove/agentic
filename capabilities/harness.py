@@ -20,7 +20,7 @@ _MENTION_PATTERN = re.compile(r"(?:^|[^\w`])@[A-Za-z0-9._-]+(?=\W|$)")
 
 _HARNESS_INSTRUCTIONS = """## Harness Rules
 
-- 当前是公开的对话，你的回复所有人都能看到。
+- This is a public conversation, and everyone can see your replies.
 - When you want to notify someone, reply a message with @someone.
 - To mention someone without notifying them, wrap it in backticks like `@someone`.
 """
