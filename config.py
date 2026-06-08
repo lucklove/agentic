@@ -97,6 +97,7 @@ class ProfileConfig:
     model: str
     gitea: GiteaProfileConfig
     instructions: str
+    model_settings: dict[str, Any] = field(default_factory=dict)
     working_dir: str | None = None
     # Keys are capability names; values are the option dicts from YAML.
     # e.g. {"filesystem": {"include_execute": false}, "code_exec": {}, "skills": {"names": [...]}}
@@ -114,6 +115,7 @@ def load_profile(path: str | Path) -> ProfileConfig:
 
     return ProfileConfig(
         model=data["model"],
+        model_settings=data.get("model_settings", {}),
         gitea=GiteaProfileConfig(token=data["gitea"]["token"]),
         instructions=data["instructions"],
         working_dir=data.get("working_dir"),

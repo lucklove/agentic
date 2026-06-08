@@ -18,9 +18,9 @@ from __future__ import annotations
 
 from pathlib import Path
 from string import Template
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Sequence, cast
 
-from pydantic_ai import Agent, AgentRetries
+from pydantic_ai import Agent, AgentRetries, ModelSettings
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.models.anthropic import AnthropicCompaction
 from pydantic_ai.models.openai import OpenAICompaction
@@ -153,6 +153,7 @@ def make_agent(
 
     return Agent(
         build_model(profile.model),
+        model_settings=cast(ModelSettings, profile.model_settings),
         output_type=str,
         deps_type=AgentDeps,
         capabilities=capabilities,

@@ -7,6 +7,9 @@
 #   - openai-responses:<model>
 #   - anthropic:<model>
 model: "openai-responses:gpt-5.5"
+# Optional extra model settings passed through to pydantic-ai ModelSettings.
+# model_settings:
+#   thinking: high
 
 gitea:
   token: "YOUR_GITEA_TOKEN"

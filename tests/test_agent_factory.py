@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from pydantic_ai import ModelSettings
 from pydantic_ai.models.anthropic import AnthropicCompaction
 from pydantic_ai.models.openai import OpenAICompaction
 
@@ -18,6 +19,7 @@ def _registry() -> dict:
     )
     profile = ProfileConfig(
         model="openai-responses:gpt-5.5",
+        model_settings={},
         gitea=GiteaProfileConfig(token="token"),
         instructions="test",
     )
@@ -51,6 +53,39 @@ def test_registry_builds_harness() -> None:
     assert isinstance(capability, HarnessCapability)
 
 
+def test_make_agent_passes_model_settings() -> None:
+    from agent_factory import make_agent
+    from deps import AgentDeps
+
+    global_cfg = GlobalConfig(
+        gitea=GiteaGlobalConfig(base_url="http://gitea.example", mcp_command=[]),
+    )
+    profile = ProfileConfig(
+        model="openai-responses:gpt-5.5",
+        model_settings={"thinking": "high"},
+        gitea=GiteaProfileConfig(token="token"),
+        instructions="test",
+    )
+
+    with patch("agent_factory.Agent") as agent_cls, patch(
+        "agent_factory.build_model", return_value="model"
+    ):
+        make_agent(
+            profile,
+            global_cfg,
+            AgentDeps(
+                backend=object(),
+                gitea_username="code_agent",
+                gitea_base_url="http://gitea.example",
+                gitea_token="token",
+                profile_name="profile",
+            ),
+        )
+
+    kwargs = agent_cls.call_args.kwargs
+    assert kwargs["model_settings"] == ModelSettings(thinking="high")
+
+
 def test_registry_merges_skills_from_multiple_directories() -> None:
     global_cfg = GlobalConfig(
         gitea=GiteaGlobalConfig(base_url="http://gitea.example", mcp_command=[]),
@@ -58,6 +93,7 @@ def test_registry_merges_skills_from_multiple_directories() -> None:
     )
     profile = ProfileConfig(
         model="openai-responses:gpt-5.5",
+        model_settings={},
         gitea=GiteaProfileConfig(token="token"),
         instructions="test",
     )
@@ -109,6 +145,7 @@ def test_registry_uses_global_skills_when_profile_skills_dirs_empty() -> None:
     )
     profile = ProfileConfig(
         model="openai-responses:gpt-5.5",
+        model_settings={},
         gitea=GiteaProfileConfig(token="token"),
         instructions="test",
     )

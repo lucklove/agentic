@@ -64,12 +64,15 @@ model: openai-responses:gpt-5.5
 gitea:
   token: token
 working_dir: ./profile-workspace
+model_settings:
+  thinking: high
 instructions: test
 """)
 
     profile = load_profile(path)
 
     assert profile.working_dir == "./profile-workspace"
+    assert profile.model_settings == {"thinking": "high"}
 
 
 def test_main_help_includes_config_and_profiles_root_flags() -> None:
