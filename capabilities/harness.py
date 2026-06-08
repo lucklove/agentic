@@ -20,7 +20,8 @@ _MENTION_PATTERN = re.compile(r"(?:^|[^\w`])@[A-Za-z0-9._-]+(?=\W|$)")
 
 _HARNESS_INSTRUCTIONS = """## Harness Rules
 
-- When you want to notify someone, use gitea_issue_write to leave a comment with @someone.
+- 当前是公开的对话，你的回复所有人都能看到。
+- When you want to notify someone, reply a message with @someone.
 - To mention someone without notifying them, wrap it in backticks like `@someone`.
 """
 

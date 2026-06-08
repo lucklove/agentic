@@ -30,7 +30,8 @@ def test_instructions_include_shared_rules() -> None:
     instructions = HarnessCapability().get_instructions()
 
     assert "Harness Rules" in instructions
-    assert "use gitea_issue_write to leave a comment with @someone" in instructions
+    assert "当前是公开的对话，你的回复所有人都能看到" in instructions
+    assert "reply a message with @someone" in instructions
     assert "wrap it in backticks like `@someone`" in instructions
 
 
