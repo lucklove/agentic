@@ -30,8 +30,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
+import fcntl
+import json
+import os
+import socket
+import sys
 from pathlib import Path
-from typing import NamedTuple
+from typing import NamedTuple, TextIO
 
 import httpx
 import logfire
@@ -48,15 +54,8 @@ _DEFAULT_AGENTIC_DIR = Path.home() / ".agentic"
 _DEFAULT_GLOBAL_CONFIG_PATH = _DEFAULT_AGENTIC_DIR / "agentic.yaml"
 
 
-async def _resolve_username(base_url: str, token: str) -> str:
-    """Fetch the Gitea login name for *token* via a single REST call."""
-    async with httpx.AsyncClient(
-        base_url=base_url,
-        headers={"Authorization": f"token {token}"},
-    ) as client:
-        resp = await client.get("/api/v1/user")
-        resp.raise_for_status()
-        return resp.json()["login"]
+class ProfileLockError(RuntimeError):
+    """Raised when a profile is already running in another process."""
 
 
 class AgentRuntime(NamedTuple):
@@ -83,6 +82,11 @@ def _profile_dir(profiles_root: Path, profile_name: str) -> Path:
     return profiles_root / profile_name
 
 
+def _profile_lock_path(profiles_root: Path, profile_name: str) -> Path:
+    """Return the lock file path for *profile_name* under *profiles_root*."""
+    return _profile_dir(profiles_root, profile_name) / "profile.yaml.lock"
+
+
 def _discover_profiles(profiles_root: Path) -> list[str]:
     """Discover profile names from ``<profiles-root>/*/profile.yaml``."""
     if not profiles_root.is_dir():
@@ -90,6 +94,82 @@ def _discover_profiles(profiles_root: Path) -> list[str]:
     return sorted(
         d.name for d in profiles_root.iterdir() if (d / "profile.yaml").is_file()
     )
+
+
+async def _resolve_username(base_url: str, token: str) -> str:
+    """Fetch the Gitea login name for *token* via a single REST call."""
+    async with httpx.AsyncClient(
+        base_url=base_url,
+        headers={"Authorization": f"token {token}"},
+    ) as client:
+        resp = await client.get("/api/v1/user")
+        resp.raise_for_status()
+        return resp.json()["login"]
+
+
+def _profile_lock_metadata(profile_name: str) -> dict[str, str | int]:
+    return {
+        "profile": profile_name,
+        "pid": os.getpid(),
+        "hostname": socket.gethostname(),
+    }
+
+
+def _write_profile_lock(lock_file: TextIO, profile_name: str) -> None:
+    lock_file.seek(0)
+    lock_file.truncate()
+    json.dump(_profile_lock_metadata(profile_name), lock_file)
+    lock_file.write("\n")
+    lock_file.flush()
+
+
+def _read_profile_lock(lock_file: TextIO) -> dict[str, object]:
+    lock_file.seek(0)
+    raw = lock_file.read().strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return {"raw": raw}
+    return data if isinstance(data, dict) else {"raw": raw}
+
+
+def _profile_lock_error(
+    profile_name: str, holder: dict[str, object]
+) -> ProfileLockError:
+    pid = holder.get("pid")
+    hostname = holder.get("hostname")
+    if pid is not None and hostname is not None:
+        details = f"pid {pid} on host {hostname}"
+    elif pid is not None:
+        details = f"pid {pid}"
+    elif holder.get("raw"):
+        details = f"lock details: {holder['raw']}"
+    else:
+        details = "another process"
+    return ProfileLockError(f"profile {profile_name!r} is already running in {details}")
+
+
+@contextlib.contextmanager
+def profile_lock(profiles_root: Path, profile_name: str):
+    lock_path = _profile_lock_path(profiles_root, profile_name)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+", encoding="utf-8") as lock_file:
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise _profile_lock_error(
+                profile_name, _read_profile_lock(lock_file)
+            ) from None
+
+        _write_profile_lock(lock_file, profile_name)
+        try:
+            yield
+        finally:
+            lock_file.seek(0)
+            lock_file.truncate()
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 async def _build_runtime(
@@ -133,14 +213,15 @@ async def _build_runtime(
 async def _poll_profile(
     profile_name: str, global_config_path: Path, profiles_root: Path
 ) -> None:
-    runtime = await _build_runtime(profile_name, global_config_path, profiles_root)
+    with profile_lock(profiles_root, profile_name):
+        runtime = await _build_runtime(profile_name, global_config_path, profiles_root)
 
-    await poll_forever(
-        runtime.agent,
-        interval=runtime.profile.polling.interval,
-        deps=runtime.deps,
-        request_limit=runtime.request_limit,
-    )
+        await poll_forever(
+            runtime.agent,
+            interval=runtime.profile.polling.interval,
+            deps=runtime.deps,
+            request_limit=runtime.request_limit,
+        )
 
 
 async def run_profiles(
@@ -153,18 +234,12 @@ async def run_profiles(
     )
     logfire.instrument_pydantic_ai()
 
-    results = await asyncio.gather(
+    await asyncio.gather(
         *(
             _poll_profile(name, global_config_path, profiles_root)
             for name in profile_names
-        ),
-        return_exceptions=True,
+        )
     )
-    for name, result in zip(profile_names, results, strict=True):
-        if isinstance(result, BaseException):
-            logfire.error(
-                "profile {name} exited with error", name=name, exc_info=result
-            )
 
 
 async def run_instruction(
@@ -180,10 +255,11 @@ async def run_instruction(
     )
     logfire.instrument_pydantic_ai()
 
-    runtime = await _build_runtime(profile_name, global_config_path, profiles_root)
-    async with runtime.agent:
-        result = await runtime.agent.run(instruction, deps=runtime.deps)
-        print(result.output)
+    with profile_lock(profiles_root, profile_name):
+        runtime = await _build_runtime(profile_name, global_config_path, profiles_root)
+        async with runtime.agent:
+            result = await runtime.agent.run(instruction, deps=runtime.deps)
+            print(result.output)
 
 
 if __name__ == "__main__":
@@ -250,5 +326,8 @@ if __name__ == "__main__":
             )
         else:
             asyncio.run(run_profiles(profile_names, global_config_path, profiles_root))
+    except ProfileLockError as exc:
+        print(exc, file=sys.stderr)
+        raise SystemExit(1) from None
     except KeyboardInterrupt:
         print("Interrupted.")
