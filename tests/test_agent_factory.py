@@ -87,6 +87,29 @@ def test_make_agent_passes_model_settings() -> None:
     assert kwargs["model_settings"] == ModelSettings(thinking="high")
 
 
+def test_make_agent_appends_global_instructions_after_profile() -> None:
+    from agent_factory import make_agent
+
+    global_cfg = GlobalConfig(
+        gitea=GiteaGlobalConfig(base_url="http://gitea.example", mcp_command=[]),
+        instructions="shared for $gitea_username",
+    )
+    profile = ProfileConfig(
+        model="openai-responses:gpt-5.5",
+        model_settings={},
+        gitea=GiteaProfileConfig(token="token"),
+        instructions="profile first",
+    )
+
+    with patch("agent_factory.Agent") as agent_cls, patch(
+        "agent_factory.build_model", return_value="model"
+    ):
+        make_agent(profile, global_cfg, _deps())
+
+    kwargs = agent_cls.call_args.kwargs
+    assert kwargs["instructions"] == "profile first\n\nshared for code_agent"
+
+
 def test_make_agent_rejects_unknown_global_capability() -> None:
     from agent_factory import make_agent
 

@@ -32,6 +32,19 @@ working_dir: /workspace/default
     assert config.working_dir == "/workspace/default"
 
 
+def test_load_global_config_reads_instructions(tmp_path: Path) -> None:
+    path = tmp_path / "agentic.yaml"
+    path.write_text("""
+gitea:
+  base_url: http://gitea.example
+instructions: shared rules
+""")
+
+    config = load_global_config(path)
+
+    assert config.instructions == "shared rules"
+
+
 def test_load_global_config_reads_agent_request_limit(tmp_path: Path) -> None:
     path = tmp_path / "agentic.yaml"
     path.write_text("""

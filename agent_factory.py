@@ -163,7 +163,12 @@ def make_agent(
         registry[name](opts) for name, opts in effective_capabilities.items()
     ]
 
-    instructions = Template(profile.instructions).safe_substitute(
+    raw_instructions = "\n\n".join(
+        instruction
+        for instruction in [profile.instructions, global_cfg.instructions]
+        if instruction
+    )
+    instructions = Template(raw_instructions).safe_substitute(
         gitea_username=deps.gitea_username
     )
 

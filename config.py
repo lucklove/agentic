@@ -39,6 +39,7 @@ class GiteaGlobalConfig:
 @dataclass
 class GlobalConfig:
     gitea: GiteaGlobalConfig
+    instructions: str = ""
     working_dir: str = "."
     skills_dir: str = "./skills"
     agent_request_limit: int = 100
@@ -68,6 +69,7 @@ def load_global_config(path: str | Path) -> GlobalConfig:
                 ["go", "run", "gitea.com/gitea/gitea-mcp@latest", "-t", "stdio"],
             ),
         ),
+        instructions=data.get("instructions", ""),
         working_dir=data.get("working_dir", "."),
         skills_dir=data.get("skills_dir", "./skills"),
         agent_request_limit=int(data.get("agent_request_limit", 100)),
