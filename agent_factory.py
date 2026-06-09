@@ -154,11 +154,13 @@ def make_agent(
 
     # Merge global defaults with profile overrides; profile entries win on name collision.
     effective_capabilities = global_cfg.capabilities | profile.capabilities
+    unknown_capabilities = sorted(set(effective_capabilities).difference(registry))
+    if unknown_capabilities:
+        unknown_list = ", ".join(unknown_capabilities)
+        raise ValueError(f"unknown capability keys: {unknown_list}")
 
     capabilities: list[AbstractCapability[Any]] = [
-        registry[name](opts)
-        for name, opts in effective_capabilities.items()
-        if name in registry
+        registry[name](opts) for name, opts in effective_capabilities.items()
     ]
 
     instructions = Template(profile.instructions).safe_substitute(

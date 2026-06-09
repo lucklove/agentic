@@ -14,12 +14,13 @@ highest comment id the poller has already delivered to the agent.
 from __future__ import annotations
 
 import hashlib
+import logging
 import pickle
 import re
 from pathlib import Path
 from typing import Any
 
-from pydantic_ai.messages import ModelMessage
+from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse
 
 __all__ = [
     "marker_for",
@@ -33,6 +34,17 @@ __all__ = [
 
 _MARKER_TEMPLATE = (
     "<!-- agentic:@{agent_name} last_seen_comment_id={last_seen_comment_id} -->"
+)
+
+logger = logging.getLogger(__name__)
+
+_HISTORY_LOAD_EXCEPTIONS = (
+    OSError,
+    pickle.PickleError,
+    AttributeError,
+    EOFError,
+    ImportError,
+    IndexError,
 )
 
 
@@ -72,7 +84,7 @@ def visible_comments(
     """Filter out conversation-type comments for *agent_name*.
 
     A comment is considered conversation-type if its ``body`` contains the
-    current agent's marker.  Both agent-authored and human-authored comments
+    current agent's marker. Both agent-authored and human-authored comments
     that reference the marker are excluded.
     """
     return [
@@ -94,15 +106,27 @@ def subject_message_key(
 
 
 def load_history(messages_dir: Path, key: str) -> list[ModelMessage]:
-    """Load persisted message history for *key*, or return ``[]``."""
+    """Load persisted message history for *key*, or return ``[]``.
+
+    Corrupt or incompatible history files are ignored after a warning so polling
+    can continue without silently discarding the failure signal.
+    """
     path = messages_dir / f"{key}.pkl"
     if not path.exists():
         return []
     try:
         data = path.read_bytes()
-        return pickle.loads(data)  # noqa: S301
-    except Exception:
+        history = pickle.loads(data)  # noqa: S301
+    except _HISTORY_LOAD_EXCEPTIONS:
+        logger.warning("failed to load message history from %s", path, exc_info=True)
         return []
+
+    if not isinstance(history, list) or any(
+        not isinstance(message, (ModelRequest, ModelResponse)) for message in history
+    ):
+        raise TypeError(f"unexpected message history payload in {path}")
+
+    return history
 
 
 def save_history(

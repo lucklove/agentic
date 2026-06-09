@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import pickle
 from pathlib import Path
 
 from pydantic_ai.messages import ModelRequest, UserPromptPart
@@ -99,7 +101,7 @@ def test_subject_message_key_deterministic() -> None:
     key1 = subject_message_key("owner", "repo", "Issue", "42")
     key2 = subject_message_key("owner", "repo", "Issue", "42")
     assert key1 == key2
-    assert len(key1) == 32  # md5 hex digest
+    assert len(key1) == 32
 
 
 def test_subject_message_key_differs_by_type() -> None:
@@ -132,6 +134,33 @@ def test_save_and_load_history_roundtrip(tmp_path: Path) -> None:
 
 def test_load_history_returns_empty_for_missing_key(tmp_path: Path) -> None:
     assert load_history(tmp_path, "nonexistent") == []
+
+
+def test_load_history_warns_and_returns_empty_for_invalid_pickle(
+    tmp_path: Path, caplog
+) -> None:
+    key = "broken"
+    path = tmp_path / f"{key}.pkl"
+    path.write_bytes(b"not-a-pickle")
+
+    with caplog.at_level(logging.WARNING):
+        loaded = load_history(tmp_path, key)
+
+    assert loaded == []
+    assert f"failed to load message history from {path}" in caplog.text
+
+
+def test_load_history_propagates_unexpected_exceptions(tmp_path: Path) -> None:
+    key = "unexpected"
+    path = tmp_path / f"{key}.pkl"
+    path.write_bytes(pickle.dumps({"unexpected": "payload"}))
+
+    try:
+        load_history(tmp_path, key)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("expected TypeError for unexpected history payload")
 
 
 def test_save_history_creates_directory(tmp_path: Path) -> None:
