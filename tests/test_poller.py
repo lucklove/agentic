@@ -8,7 +8,6 @@ import pytest
 
 from deps import AgentDeps
 from poller import (
-    _build_context_message,
     _handle_notification,
     _latest_delivered_comment_id,
     _notification_span_name,
@@ -130,28 +129,6 @@ def notification(subject_type: str = "Issue") -> dict[str, object]:
             "title": "bug",
         },
     }
-
-
-def test_build_context_message_excludes_shared_rules() -> None:
-    message = _build_context_message(notification(), visible_count=0)
-
-    assert "Shared notification-handling rules" not in message
-    assert "if someone @mentions you" not in message
-    assert "Do not react to your own comments" not in message
-    assert "Read the project's AGENTS.md" not in message
-
-
-def test_build_context_message_includes_visible_count() -> None:
-    message = _build_context_message(notification(), visible_count=3)
-
-    assert "3 visible comment(s)" in message
-    assert "conversation-type comments are excluded" in message
-
-
-def test_build_context_message_zero_visible_comments() -> None:
-    message = _build_context_message(notification(), visible_count=0)
-
-    assert "No visible comments yet" in message
 
 
 def test_notification_span_name_includes_gitea_username() -> None:

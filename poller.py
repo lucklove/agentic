@@ -47,15 +47,6 @@ _DEPENDENCIES_PATH_TEMPLATE = Template(
     "/api/v1/repos/$owner/$repo/issues/$number/dependencies"
 )
 _MENTION_PATTERN = re.compile(r"(?:^|[^\w`])@([A-Za-z0-9._-]+)(?=\W|$)")
-_CONTEXT_MESSAGE_TEMPLATE = Template(
-    """New notification
-Repository: $repo
-Type: $type_label #$number
-Title: $title
-$visible_comments_hint
-
-Use your available tools to read the full context of $type_label #$number in $repo before deciding what action to take, then take the required action now when your available tools allow it."""
-)
 
 
 def _agent_run_usage_limits(request_limit: int) -> UsageLimits:
@@ -98,14 +89,6 @@ def _is_closed(item: dict[str, Any]) -> bool:
 
 def _mentioned_users(body: str) -> set[str]:
     return {match.group(1) for match in _MENTION_PATTERN.finditer(body)}
-
-
-def _is_self_marker_comment(comment: dict[str, Any]) -> bool:
-    author = _comment_author(comment)
-    if not author:
-        return False
-
-    return is_conversation_comment(comment.get("body", ""), author)
 
 
 def _comment_id(comment: dict[str, Any]) -> int:
@@ -308,37 +291,6 @@ class NotificationContext:
     async def open_dependencies(self) -> list[dict[str, Any]]:
         dependencies = await self.get_dependencies()
         return [dep for dep in dependencies if not _is_closed(dep)]
-
-
-def _build_context_message(
-    notif: dict[str, Any],
-    visible_count: int = 0,
-) -> str:
-    """Render the initial user message for an agent run from a notification."""
-    subject = notif["subject"]
-    repo: str = notif["repository"]["full_name"]
-    subject_type: str = subject["type"]  # "Issue" or "Pull"
-    number: str = _parse_number(subject["url"])
-    title: str = subject["title"]
-
-    type_label = "issue" if subject_type == "Issue" else "pull request"
-
-    if visible_count > 0:
-        visible_comments_hint = (
-            f"There are currently {visible_count} visible comment(s) on this thread "
-            "(conversation-type comments are excluded). "
-            "Read the latest context with tools before taking action."
-        )
-    else:
-        visible_comments_hint = "No visible comments yet on this thread."
-
-    return _CONTEXT_MESSAGE_TEMPLATE.substitute(
-        repo=repo,
-        type_label=type_label,
-        number=number,
-        title=title,
-        visible_comments_hint=visible_comments_hint,
-    )
 
 
 async def _mark_notification_read(
