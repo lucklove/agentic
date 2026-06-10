@@ -31,6 +31,7 @@ from conversation import (
     load_history,
     marker_for,
     save_history,
+    strip_conversation_marker,
     subject_message_key,
 )
 from deps import AgentDeps, NotificationSubject
@@ -168,7 +169,7 @@ def _chat_messages_after(
     agent_name: str,
 ) -> list[str]:
     return [
-        comment.get("body", "")
+        strip_conversation_marker(comment.get("body", ""), agent_name)
         for comment in _comments_after(comments, last_seen_comment_id)
         if _comment_author(comment) != agent_name
         and is_conversation_comment(comment.get("body", ""), agent_name)

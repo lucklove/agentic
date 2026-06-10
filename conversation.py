@@ -26,6 +26,7 @@ __all__ = [
     "marker_for",
     "is_conversation_comment",
     "last_seen_comment_id_from_marker",
+    "strip_conversation_marker",
     "visible_comments",
     "subject_message_key",
     "load_history",
@@ -75,6 +76,11 @@ def last_seen_comment_id_from_marker(body: str, agent_name: str) -> int | None:
     if match is None:
         return None
     return int(match.group(1))
+
+
+def strip_conversation_marker(body: str, agent_name: str) -> str:
+    """Remove the current agent's leading conversation marker from *body*."""
+    return _marker_pattern(agent_name).sub("", body or "", count=1).lstrip()
 
 
 def visible_comments(

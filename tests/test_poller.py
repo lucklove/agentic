@@ -564,7 +564,7 @@ def test_handle_notification_conversation_marker_uses_body_as_input(
 
         await _handle_notification(agent, http, notification(), deps)
 
-        assert agent.run_message == marker_body
+        assert agent.run_message == "I fixed the bug."
         assert agent.run_deps is not None
         # Auto-post still happens unconditionally
         assert len(http.posts) == 1
@@ -575,7 +575,7 @@ def test_handle_notification_conversation_marker_uses_body_as_input(
     asyncio.run(run())
 
 
-def test_handle_notification_conversation_marker_does_not_strip_marker(
+def test_handle_notification_conversation_marker_strips_marker(
     deps: AgentDeps,
 ) -> None:
     body_with_marker = (
@@ -602,7 +602,7 @@ def test_handle_notification_conversation_marker_does_not_strip_marker(
 
         await _handle_notification(agent, http, notification(), deps)
 
-        assert agent.run_message == body_with_marker
+        assert agent.run_message == "Please continue."
 
     asyncio.run(run())
 
@@ -763,9 +763,7 @@ def test_handle_notification_excludes_agent_own_marker_from_input_message(
         await _handle_notification(agent, http, notification(), deps)
 
         assert agent.run_message is not None
-        assert agent.run_message == (
-            "<!-- agentic:@code_agent last_seen_comment_id=1 -->\n\nsecond reply from human"
-        )
+        assert agent.run_message == "second reply from human"
         assert http.posts[0][1]["body"].startswith(
             "<!-- agentic:@code_agent last_seen_comment_id=3 -->"
         )
@@ -812,8 +810,8 @@ def test_handle_notification_merges_chat_then_mentions_into_one_message(
         await _handle_notification(agent, http, notification(), deps)
 
         assert agent.run_message == (
-            "<!-- agentic:@code_agent last_seen_comment_id=0 -->\n\nchat 1\n\n"
-            "<!-- agentic:@code_agent last_seen_comment_id=0 -->\n\nchat 2 @code_agent\n\n"
+            "chat 1\n\n"
+            "chat 2 @code_agent\n\n"
             "Someone mentioned you in autonomous/agentic issue #31\n\n"
             "======== comment id: 3, from @agent_a ========\n\n"
             "Please handle this @code_agent\n\n"
@@ -852,7 +850,7 @@ def test_handle_notification_chat_comment_with_mention_is_not_duplicated(
 
         await _handle_notification(agent, http, notification(), deps)
 
-        assert agent.run_message == chat_body
+        assert agent.run_message == "please continue @code_agent"
         assert agent.run_message.count("please continue @code_agent") == 1
         assert (
             "Someone mentioned you in autonomous/agentic issue #31"

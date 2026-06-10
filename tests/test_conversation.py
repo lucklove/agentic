@@ -12,6 +12,7 @@ from conversation import (
     load_history,
     marker_for,
     save_history,
+    strip_conversation_marker,
     subject_message_key,
     visible_comments,
 )
@@ -63,6 +64,16 @@ def test_last_seen_comment_id_from_marker_missing() -> None:
 
 def test_is_conversation_comment_empty_body() -> None:
     assert is_conversation_comment("", "code_agent") is False
+
+
+def test_strip_conversation_marker() -> None:
+    body = "<!-- agentic:@code_agent last_seen_comment_id=12 -->\n\nPlease continue."
+    assert strip_conversation_marker(body, "code_agent") == "Please continue."
+
+
+def test_strip_conversation_marker_no_match_returns_body() -> None:
+    body = "Regular comment"
+    assert strip_conversation_marker(body, "code_agent") == body
 
 
 def test_visible_comments_filters_conversation() -> None:
