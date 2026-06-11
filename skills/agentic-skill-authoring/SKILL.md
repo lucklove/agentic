@@ -115,7 +115,28 @@ Examples of good naming:
 - `gitea-pr-review`
 - `systematic-debugging`
 
-### 4. Write the frontmatter
+### 4. Create the expected skill layout
+
+Skills in this repository should follow this structure:
+
+```text
+skills/<skill-name>/
+|-- SKILL.md
+|-- references/   # optional static supporting material
+`-- scripts/      # optional deterministic helper automation
+```
+
+Use:
+
+- `SKILL.md` for the main operating manual.
+- `references/` for static materials such as checklists, templates, worked
+  examples, schemas, or policy notes.
+- `scripts/` for repeatable automation that future agents should actually run.
+
+Do not put generated artifacts, caches, secrets, or machine-local state in the
+skill directory.
+
+### 5. Write the frontmatter
 
 Every skill must start with YAML frontmatter:
 
@@ -136,7 +157,7 @@ Frontmatter rules:
 
 A good description answers: "When should I use this skill?"
 
-### 5. Write the body as an operating manual
+### 6. Write the body as an operating manual
 
 The body should help another agent complete the workflow with minimal
 interpretation. Prefer sections like:
@@ -159,7 +180,7 @@ Write concrete actions, for example:
 Do not stop at principles like "be careful" or "follow project conventions".
 Translate those principles into observable actions.
 
-### 6. Split supporting material when it improves reuse
+### 7. Split supporting material when it improves reuse
 
 Use `references/` for static material such as:
 
@@ -183,7 +204,62 @@ Choose carefully:
 Do not create references or scripts just to make the skill look sophisticated.
 Add them only when they increase clarity or repeatability.
 
-### 7. Include pitfalls and validation
+### 8. Follow script conventions when automation is needed
+
+Supported script styles depend on the runtime, but these conventions are safe
+for this repository:
+
+| Extension | Interpreter |
+|---|---|
+| `.py` | Python, preferably through `uv` |
+| `.sh`, `.bash`, `.zsh`, `.fish` | Corresponding shell |
+| executable with no extension | Direct execution on macOS/Linux |
+
+For Python helper scripts with dependencies, prefer a `uv` shebang plus a PEP
+723 metadata block so the skill stays self-contained:
+
+```python
+#!/usr/bin/env -S uv run -q
+# /// script
+# requires-python = ">=3.14"
+# dependencies = ["httpx>=0.28"]
+# ///
+"""Short description of what this script does."""
+
+import argparse
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--region", required=True)
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+    print(f"done: {args.region}, dry_run={args.dry_run}")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+If an extensionless script must be invoked directly, make it executable and say
+so in the skill instructions.
+
+### 9. Prefer predictable CLI argument conventions
+
+Prefer named flags over positional arguments so agent invocation is easier to
+understand and less error-prone.
+
+| Python value | CLI result |
+|---|---|
+| `"us-east-1"` | `--region us-east-1` |
+| `True` | `--dry-run` |
+| `False` / `None` | omitted |
+| `["a", "b"]` | `--item a --item b` |
+
+Document each script argument in `SKILL.md`, including defaults, accepted
+values, and any required environment variables.
+
+### 10. Include pitfalls and validation
 
 A high-quality skill should name the mistakes agents are likely to make and how
 to avoid them.
@@ -195,7 +271,7 @@ It should also explain how to verify success, such as:
 - commands to run
 - examples of the expected result
 
-### 8. Add a minimal example when helpful
+### 11. Add a minimal example when helpful
 
 If the workflow is easy to misunderstand, include a small example or a reference
 file showing:
@@ -206,45 +282,25 @@ file showing:
 
 A minimal example is often better than extra theory.
 
-## Required structure guidance
-
-Skills in this repository should follow this structure:
+Example minimal layout:
 
 ```text
 skills/my-skill/
 |-- SKILL.md
-|-- references/   # optional
-`-- scripts/      # optional
+|-- references/
+|   `-- checklist.md
+`-- scripts/
+    `-- summarize.py
 ```
 
-Required guidance:
+Example minimum frontmatter:
 
-- `SKILL.md` must exist.
-- `SKILL.md` must begin with YAML frontmatter.
-- `name` must equal the directory name.
-- `description` must clearly indicate the trigger or usage context.
-- The Markdown body must contain concrete, repository-relevant instructions.
-- `references/` should hold static supporting material.
-- `scripts/` should hold deterministic helper automation, not arbitrary project
-  code.
-
-Prefer repository-relative paths in examples. Avoid machine-local assumptions
-unless the skill is explicitly about a local-only environment.
-
-## Content quality checklist
-
-Before considering the skill done, confirm all of these:
-
-- The trigger for using the skill is explicit.
-- The scope is clear: create, revise, investigate, review, release, debug, or
-  another concrete workflow.
-- The steps are ordered and executable.
-- Repository-specific constraints are named where relevant.
-- Common pitfalls or wrong assumptions are called out.
-- Verification steps exist and are practical.
-- The guidance matches current `agentic` capabilities and file layout.
-- The writing avoids empty platform-agnostic slogans.
-- Any references or scripts are clearly introduced from `SKILL.md`.
+```yaml
+---
+name: my-skill-name
+description: One-line description shown to the agent during discovery.
+---
+```
 
 ## Tool usage guidance
 
@@ -263,6 +319,21 @@ When authoring a skill, follow these tool-use rules:
 
 This repository may contain skills inspired by other systems, but the skill you
 write must stand on facts that are valid for `agentic` itself.
+
+## Content quality checklist
+
+Before considering the skill done, confirm all of these:
+
+- The trigger for using the skill is explicit.
+- The scope is clear: create, revise, investigate, review, release, debug, or
+  another concrete workflow.
+- The steps are ordered and executable.
+- Repository-specific constraints are named where relevant.
+- Common pitfalls or wrong assumptions are called out.
+- Verification steps exist and are practical.
+- The guidance matches current `agentic` capabilities and file layout.
+- The writing avoids empty platform-agnostic slogans.
+- Any references or scripts are clearly introduced from `SKILL.md`.
 
 ## Common pitfalls
 

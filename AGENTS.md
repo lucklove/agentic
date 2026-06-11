@@ -22,4 +22,4 @@
 
 - [README](README.md)
 - [Profile template](profiles/example.yaml.template)
-- [Skill authoring guide](skills/create-skill/SKILL.md)
+- [Skill authoring guide](skills/agentic-skill-authoring/SKILL.md)

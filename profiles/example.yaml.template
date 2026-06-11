@@ -44,7 +44,7 @@ capabilities:
     include_execute: true
   skills:
     # allow:
-    #   - example-skill
+    #   - agentic-skill-authoring
     # deny:
     #   - noisy-skill
   # memory:
