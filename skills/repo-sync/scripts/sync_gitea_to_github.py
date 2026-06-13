@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -16,6 +17,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 CREDENTIAL_URL_RE = re.compile(r"(https?://)[^\s/@]+@")
 TRAILING_PR_RE = re.compile(r"\s*\(#[0-9]+\)\s*$")
+ISSUE_REF_RE = re.compile(r"(?<!\w)#[0-9]+\b")
 NON_SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
@@ -145,6 +147,28 @@ def rewrite_body(body: str, gitea_url_re: re.Pattern[str]) -> str:
     return "\n".join(lines)
 
 
+def validate_pr_text(
+    title: str, body: str, gitea_url_re: re.Pattern[str]
+) -> tuple[str, str]:
+    cleaned_title = core_title(title)
+    if cleaned_title != title.strip():
+        raise SystemExit(
+            "pull request title must not include trailing issue or pull-request numbers"
+        )
+    if ISSUE_REF_RE.search(cleaned_title):
+        raise SystemExit(
+            "pull request title must not include issue or pull-request numbers"
+        )
+    cleaned_body = rewrite_body(body, gitea_url_re)
+    if cleaned_body != body.strip():
+        raise SystemExit("pull request body must not include Gitea links")
+    if ISSUE_REF_RE.search(cleaned_body):
+        raise SystemExit(
+            "pull request body must not include issue or pull-request numbers"
+        )
+    return cleaned_title, cleaned_body
+
+
 def commit_message(repo_dir: Path, sha: str) -> tuple[str, str]:
     raw_message = git_capture(repo_dir, "log", "-1", "--format=%B", sha)
     title, _, body = raw_message.partition("\n")
@@ -203,16 +227,63 @@ def ensure_clean_worktree(repo_dir: Path) -> None:
         )
 
 
+def fetch_sync_state(
+    args: argparse.Namespace,
+) -> tuple[set[str], set[str], dict[str, tuple[str, str]]]:
+    git(
+        args.repo_dir,
+        "fetch",
+        "_github",
+        f"{args.main_branch}:refs/remotes/_github/{args.main_branch}",
+    )
+    git(
+        args.repo_dir,
+        "fetch",
+        "_gitea",
+        f"{args.main_branch}:refs/remotes/_gitea/{args.main_branch}",
+    )
+    github_titles = log_titles(args.repo_dir, f"_github/{args.main_branch}")
+    pr_titles = open_pr_titles(args.github_repo)
+    candidates: dict[str, tuple[str, str]] = {}
+    for sha in gitea_commits(args.repo_dir, args.main_branch):
+        original_title, original_body = commit_message(args.repo_dir, sha)
+        rewritten_title = core_title(original_title)
+        if rewritten_title in github_titles or rewritten_title in pr_titles:
+            continue
+        candidates[sha] = (
+            rewritten_title,
+            rewrite_body(original_body, args.gitea_url_re),
+        )
+    return github_titles, pr_titles, candidates
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Cherry-pick unsynced Gitea commits to GitHub and open PRs.",
+        description="List or sync unsynced Gitea commits to GitHub.",
     )
-    parser.add_argument("--repo-dir", required=True, type=git_repo)
-    parser.add_argument("--gitea-url", required=True)
-    parser.add_argument("--github-url", required=True)
-    parser.add_argument("--github-repo")
-    parser.add_argument("--main-branch", default="main")
-    parser.add_argument("--dry-run", action="store_true")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    def add_shared_arguments(command_parser: argparse.ArgumentParser) -> None:
+        command_parser.add_argument("--repo-dir", required=True, type=git_repo)
+        command_parser.add_argument("--gitea-url", required=True)
+        command_parser.add_argument("--github-url", required=True)
+        command_parser.add_argument("--github-repo")
+        command_parser.add_argument("--main-branch", default="main")
+
+    list_parser = subparsers.add_parser(
+        "list", description="List unsynced Gitea commits that still need GitHub PRs."
+    )
+    add_shared_arguments(list_parser)
+
+    sync_parser = subparsers.add_parser(
+        "sync", description="Sync one unsynced Gitea commit to GitHub as a PR."
+    )
+    add_shared_arguments(sync_parser)
+    sync_parser.add_argument("--commit", required=True)
+    sync_parser.add_argument("--pr-title", required=True)
+    sync_parser.add_argument("--pr-body", required=True)
+    sync_parser.add_argument("--dry-run", action="store_true")
+
     args = parser.parse_args()
     if not args.github_repo:
         args.github_repo = github_repo_name(args.github_url)
@@ -238,7 +309,10 @@ def create_sync_pr(
         return "skipped"
 
     if not args.dry_run:
-        git(repo_dir, "commit", "-m", title, "-m", body)
+        commit_command = ["git", "-C", str(repo_dir), "commit", "-m", title]
+        if body:
+            commit_command.extend(["-m", body])
+        subprocess_run(commit_command)
     else:
         print(f"dry-run: would commit {sha} as {title!r}")
         git(repo_dir, "reset", "--hard", "HEAD")
@@ -276,8 +350,33 @@ def create_sync_pr(
     return "synced"
 
 
-def sync(args: argparse.Namespace) -> None:
+def list_commits(args: argparse.Namespace) -> None:
+    add_remote(args.repo_dir, "_github", args.github_url)
+    add_remote(args.repo_dir, "_gitea", args.gitea_url)
+    try:
+        _, _, candidates = fetch_sync_state(args)
+    finally:
+        remove_remote(args.repo_dir, "_github")
+        remove_remote(args.repo_dir, "_gitea")
+    print(
+        json.dumps(
+            [
+                {
+                    "commit": sha,
+                    "commit_title": title,
+                    "commit_body": body,
+                }
+                for sha, (title, body) in candidates.items()
+            ],
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
+def sync_commit(args: argparse.Namespace) -> None:
     ensure_clean_worktree(args.repo_dir)
+    pr_title, pr_body = validate_pr_text(args.pr_title, args.pr_body, args.gitea_url_re)
     add_remote(args.repo_dir, "_github", args.github_url)
     add_remote(args.repo_dir, "_gitea", args.gitea_url)
     original_head = git_capture(
@@ -285,66 +384,37 @@ def sync(args: argparse.Namespace) -> None:
     ).strip()
     if original_head == "HEAD":
         original_head = git_capture(args.repo_dir, "rev-parse", "HEAD").strip()
-    synced = 0
-    skipped = 0
     try:
-        git(
-            args.repo_dir,
-            "fetch",
-            "_github",
-            f"{args.main_branch}:refs/remotes/_github/{args.main_branch}",
-        )
-        git(
-            args.repo_dir,
-            "fetch",
-            "_gitea",
-            f"{args.main_branch}:refs/remotes/_gitea/{args.main_branch}",
-        )
-        github_titles = log_titles(args.repo_dir, f"_github/{args.main_branch}")
-        commits = gitea_commits(args.repo_dir, args.main_branch)
-        print(f"found {len(commits)} Gitea commits not on GitHub")
-        pr_titles = open_pr_titles(args.github_repo) if commits else set()
-        for sha in commits:
-            original_title, original_body = commit_message(args.repo_dir, sha)
-            rewritten_title = core_title(original_title)
-            if rewritten_title in github_titles:
-                print(f"skipped {sha}: title already on GitHub main: {rewritten_title}")
-                skipped += 1
-                continue
-            if rewritten_title in pr_titles:
-                print(f"skipped {sha}: title already has open PR: {rewritten_title}")
-                skipped += 1
-                continue
-            result = create_sync_pr(
-                args.repo_dir,
-                sha,
-                rewritten_title,
-                rewrite_body(original_body, args.gitea_url_re),
-                args,
+        github_titles, pr_titles, candidates = fetch_sync_state(args)
+        if args.commit not in candidates:
+            raise SystemExit(
+                "commit is not eligible for sync; re-run the list command to refresh unsynced commits"
             )
-            if result == "synced":
-                synced += 1
-                pr_titles.add(rewritten_title)
-            else:
-                skipped += 1
-            git(args.repo_dir, "checkout", args.main_branch, check=False)
-            git(
-                args.repo_dir,
-                "branch",
-                "-D",
-                f"sync/{slugify(rewritten_title)}",
-                check=False,
+        if pr_title in github_titles:
+            raise SystemExit("pull request title already exists on GitHub main")
+        if pr_title in pr_titles:
+            raise SystemExit(
+                "pull request title already exists in an open GitHub pull request"
             )
+        result = create_sync_pr(args.repo_dir, args.commit, pr_title, pr_body, args)
+        if result != "synced":
+            raise SystemExit("sync failed")
     finally:
         git(args.repo_dir, "checkout", original_head, check=False)
+        git(args.repo_dir, "branch", "-D", f"sync/{slugify(pr_title)}", check=False)
         remove_remote(args.repo_dir, "_github")
         remove_remote(args.repo_dir, "_gitea")
-    print(f"summary: synced={synced} skipped={skipped}")
 
 
 def main() -> None:
     args = parse_args()
-    sync(args)
+    if args.command == "list":
+        list_commits(args)
+        return
+    if args.command == "sync":
+        sync_commit(args)
+        return
+    raise SystemExit(f"unsupported command: {args.command}")
 
 
 if __name__ == "__main__":

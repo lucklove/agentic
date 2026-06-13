@@ -1,25 +1,45 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 from pathlib import Path
 
 import pytest
 
-SCRIPT_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "skills"
-    / "repo-sync"
-    / "scripts"
-    / "sync_github_to_gitea.py"
+ROOT = Path(__file__).resolve().parents[1]
+GITHUB_TO_GITEA_PATH = (
+    ROOT / "skills" / "repo-sync" / "scripts" / "sync_github_to_gitea.py"
 )
-SPEC = importlib.util.spec_from_file_location("sync_github_to_gitea", SCRIPT_PATH)
-assert SPEC is not None and SPEC.loader is not None
-MODULE = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(MODULE)
+GITEA_TO_GITHUB_PATH = (
+    ROOT / "skills" / "repo-sync" / "scripts" / "sync_gitea_to_github.py"
+)
+
+
+def load_module(module_name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+GITHUB_TO_GITEA = load_module("sync_github_to_gitea", GITHUB_TO_GITEA_PATH)
+GITEA_TO_GITHUB = load_module("sync_gitea_to_github", GITEA_TO_GITHUB_PATH)
+
+
+class UrlOpenResponse:
+    def __init__(self, payload: str) -> None:
+        self._buffer = io.StringIO(payload)
+
+    def __enter__(self):
+        return self._buffer
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self._buffer.close()
 
 
 def test_build_gitea_url_uses_token_owner_and_repo() -> None:
-    url = MODULE.build_gitea_url(
+    url = GITHUB_TO_GITEA.build_gitea_url(
         "http://gitea.ai/",
         "secret-token",
         "autonomous",
@@ -33,7 +53,7 @@ def test_discover_github_url_prefers_origin_when_multiple(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        MODULE,
+        GITHUB_TO_GITEA,
         "git_remote_lines",
         lambda repo_dir: [
             (
@@ -49,7 +69,7 @@ def test_discover_github_url_prefers_origin_when_multiple(
         ],
     )
 
-    url = MODULE.discover_github_url(Path("/tmp/repo"))
+    url = GITHUB_TO_GITEA.discover_github_url(Path("/tmp/repo"))
 
     assert url == "https://github.com/tidbcloud/docker-image-controller.git"
 
@@ -58,7 +78,7 @@ def test_discover_github_url_requires_explicit_url_when_ambiguous(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        MODULE,
+        GITHUB_TO_GITEA,
         "git_remote_lines",
         lambda repo_dir: [
             (
@@ -71,14 +91,14 @@ def test_discover_github_url_requires_explicit_url_when_ambiguous(
     )
 
     with pytest.raises(SystemExit, match="multiple GitHub fetch remotes"):
-        MODULE.discover_github_url(Path("/tmp/repo"))
+        GITHUB_TO_GITEA.discover_github_url(Path("/tmp/repo"))
 
 
 def test_discover_github_url_requires_github_remote(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        MODULE,
+        GITHUB_TO_GITEA,
         "git_remote_lines",
         lambda repo_dir: [
             (
@@ -90,7 +110,7 @@ def test_discover_github_url_requires_github_remote(
     )
 
     with pytest.raises(SystemExit, match="could not find a GitHub fetch remote"):
-        MODULE.discover_github_url(Path("/tmp/repo"))
+        GITHUB_TO_GITEA.discover_github_url(Path("/tmp/repo"))
 
 
 def test_discover_gitea_url_reads_configs(tmp_path: Path) -> None:
@@ -108,7 +128,7 @@ gitea:
   token: top-secret
 """)
 
-    url = MODULE.discover_gitea_url(
+    url = GITHUB_TO_GITEA.discover_gitea_url(
         "autonomous",
         "docker-image-controller",
         "ops_agent",
@@ -117,3 +137,102 @@ gitea:
     )
 
     assert url == "http://top-secret@gitea.ai/autonomous/docker-image-controller.git"
+
+
+def test_gitea_api_repo_url_preserves_install_prefix() -> None:
+    url = GITHUB_TO_GITEA.gitea_api_repo_url(
+        "https://token@gitea.example/git/autonomous/agentic.git",
+        "autonomous",
+        "agentic",
+    )
+
+    assert (
+        url
+        == "https://gitea.example/git/api/v1/repos/autonomous/agentic/pulls?state=open&limit=1"
+    )
+
+
+def test_assert_no_open_gitea_prs_allows_empty_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        GITHUB_TO_GITEA.urllib.request,
+        "urlopen",
+        lambda request: UrlOpenResponse("[]"),
+    )
+
+    GITHUB_TO_GITEA.assert_no_open_gitea_prs(
+        "autonomous",
+        "agentic",
+        "http://token@gitea.ai/autonomous/agentic.git",
+        "ops_agent",
+    )
+
+
+def test_assert_no_open_gitea_prs_rejects_open_pulls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        GITHUB_TO_GITEA.urllib.request,
+        "urlopen",
+        lambda request: UrlOpenResponse('[{"number": 1, "title": "sync me"}]'),
+    )
+
+    with pytest.raises(SystemExit, match="has open pull requests"):
+        GITHUB_TO_GITEA.assert_no_open_gitea_prs(
+            "autonomous",
+            "agentic",
+            "http://token@gitea.ai/autonomous/agentic.git",
+            "ops_agent",
+        )
+
+
+def test_rewrite_body_strips_gitea_links() -> None:
+    rewritten = GITEA_TO_GITHUB.rewrite_body(
+        "\nSee http://gitea.ai/autonomous/agentic/issues/155\n\nMore context\n",
+        GITEA_TO_GITHUB.gitea_url_pattern(
+            "http://token@gitea.ai/autonomous/agentic.git"
+        ),
+    )
+
+    assert rewritten == "See\n\nMore context"
+
+
+def test_validate_pr_text_accepts_clean_input() -> None:
+    title, body = GITEA_TO_GITHUB.validate_pr_text(
+        "Improve repo sync skill",
+        "Port the validated commit without forge-specific references.",
+        GITEA_TO_GITHUB.gitea_url_pattern(
+            "http://token@gitea.ai/autonomous/agentic.git"
+        ),
+    )
+
+    assert title == "Improve repo sync skill"
+    assert body == "Port the validated commit without forge-specific references."
+
+
+@pytest.mark.parametrize(
+    ("title", "body", "match"),
+    [
+        ("Improve repo sync skill (#155)", "Clean body", "title must not include"),
+        ("Improve repo sync skill", "References #155", "body must not include issue"),
+        (
+            "Improve repo sync skill",
+            "See http://gitea.ai/autonomous/agentic/issues/155",
+            "body must not include Gitea links",
+        ),
+    ],
+)
+def test_validate_pr_text_rejects_forbidden_references(
+    title: str,
+    body: str,
+    match: str,
+) -> None:
+    with pytest.raises(SystemExit, match=match):
+        GITEA_TO_GITHUB.validate_pr_text(
+            title,
+            body,
+            GITEA_TO_GITHUB.gitea_url_pattern(
+                "http://token@gitea.ai/autonomous/agentic.git"
+            ),
+        )

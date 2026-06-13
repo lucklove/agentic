@@ -8,11 +8,14 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import yaml
 
@@ -191,6 +194,72 @@ def discover_gitea_url(
     return build_gitea_url(gitea["base_url"], token, owner, repo)
 
 
+def gitea_api_repo_url(gitea_url: str, owner: str, repo: str) -> str:
+    parts = urlsplit(gitea_url)
+    if parts.scheme not in {"http", "https"} or not parts.netloc:
+        raise SystemExit(f"invalid Gitea repository URL: {gitea_url}")
+    host = parts.hostname or parts.netloc.rsplit("@", 1)[-1]
+    if parts.port is not None and ":" not in host:
+        host = f"{host}:{parts.port}"
+    expected_repo_path = f"/{owner}/{repo}.git"
+    repo_path = parts.path.rstrip("/")
+    if not repo_path.endswith(expected_repo_path):
+        raise SystemExit(f"invalid Gitea repository URL: {gitea_url}")
+    install_prefix = repo_path[: -len(expected_repo_path)]
+    path = (
+        f"{install_prefix}/api/v1/repos/{quote(owner)}/{quote(repo)}/pulls"
+        "?state=open&limit=1"
+    )
+    return urlunsplit((parts.scheme, host, path, "", ""))
+
+
+def gitea_api_token(
+    gitea_url: str, profile_name: str, *, agentic_dir: Path = DEFAULT_AGENTIC_DIR
+) -> str:
+    parts = urlsplit(gitea_url)
+    if parts.username:
+        return parts.username
+    return profile_token(profile_name, agentic_dir=agentic_dir)
+
+
+def assert_no_open_gitea_prs(
+    owner: str,
+    repo: str,
+    gitea_url: str,
+    profile_name: str,
+    *,
+    agentic_dir: Path = DEFAULT_AGENTIC_DIR,
+) -> None:
+    api_url = gitea_api_repo_url(gitea_url, owner, repo)
+    token = gitea_api_token(gitea_url, profile_name, agentic_dir=agentic_dir)
+    request = urllib.request.Request(
+        api_url,
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"token {token}",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request) as response:
+            payload = json.load(response)
+    except urllib.error.HTTPError as exc:
+        raise SystemExit(
+            f"failed to query open Gitea pull requests ({exc.code}): {api_url}"
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise SystemExit(
+            f"failed to query open Gitea pull requests: {exc.reason}"
+        ) from exc
+    if not isinstance(payload, list):
+        raise SystemExit(
+            f"unexpected Gitea API response when listing pull requests: {api_url}"
+        )
+    if payload:
+        raise SystemExit(
+            "refusing GitHub→Gitea sync because the Gitea repository has open pull requests"
+        )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Force-push GitHub main to Gitea main.",
@@ -213,6 +282,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    assert_no_open_gitea_prs(args.owner, args.repo, args.gitea_url, args.profile)
     run(
         ["git", "-C", str(args.repo_dir), "fetch", args.github_url, args.main_branch],
         dry_run=args.dry_run,
