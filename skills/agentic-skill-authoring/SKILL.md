@@ -191,6 +191,11 @@ Use `references/` for static material such as:
 - schemas
 - worked examples
 
+When you document a reference, show the exact `resource_name` that callers must
+pass to `read_skill_resource(...)`. Resource names are relative to `SKILL.md`,
+so a file at `skills/my-skill/references/checklist.md` should be referenced as
+`references/checklist.md`, not just `checklist.md`.
+
 Use `scripts/` only for deterministic, reusable automation.
 
 Choose carefully:
@@ -216,7 +221,7 @@ When you document a script, show the runtime-facing invocation shape:
 ```python
 await run_skill_script(
     skill_name="my-skill",
-    script_name="summarize.py",
+    script_name="scripts/summarize.py",
     args={
         "region": "us-east-1",
         "dry_run": True,
@@ -226,8 +231,10 @@ await run_skill_script(
 
 Authoring rules for script guidance:
 
-- Use the exact basename that future agents should pass as `script_name`, such
-  as `summarize.py`.
+- Use the exact relative path that future agents should pass as `script_name`,
+  such as `scripts/summarize.py`.
+- Match the names exposed by `load_skill(...)`; callers should be able to copy
+  the path directly from the loaded skill output.
 - Describe inputs in terms of the `args={...}` object, not raw shell quoting.
 - Document what the script prints, returns, or changes so callers know how to
   use the result.
@@ -406,6 +413,7 @@ Use this quick self-review before committing:
 
 ## Optional references for this skill
 
-If you want a compact review aid, read `references/checklist.md` after drafting
-or editing a skill. It is meant for final validation, not as a substitute for
-reading this full authoring guide.
+If you want a compact review aid, call
+`read_skill_resource(skill_name="agentic-skill-authoring", resource_name="references/checklist.md")`
+after drafting or editing a skill. It is meant for final validation, not as a
+substitute for reading this full authoring guide.

@@ -29,7 +29,10 @@ Use this checklist when creating or revising a skill in this repository.
 
 - Referenced tools, paths, and commands were confirmed in the repository.
 - The skill does not depend on Hermes-only terminology or capabilities.
-- Any scripts mentioned by the skill actually exist and have documented usage.
+- Any scripts mentioned by the skill actually exist and use the exact `script_name`
+  path that `load_skill(...)` exposes, such as `scripts/example.py`.
+- Any references mentioned by the skill use the exact `resource_name` path that
+  `load_skill(...)` exposes, such as `references/checklist.md`.
 
 ## Final check
 

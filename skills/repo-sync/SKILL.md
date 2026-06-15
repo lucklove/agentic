@@ -17,13 +17,14 @@ improve the skill itself in this repository, but should not execute repository
 synchronization tasks with it unless their task and profile explicitly allow
 that operational action.
 
-Invoke helper automation through `run_skill_script(...)`; do not describe these
-scripts as if the agent should shell into `skills/repo-sync/scripts/...`
-directly.
+Invoke helper automation through `run_skill_script(...)`; pass the exact
+relative script path exposed by the skill, such as
+`script_name="scripts/sync_github_to_gitea.py"`. Do not describe these scripts
+as if the agent should shell into `skills/repo-sync/scripts/...` directly.
 
 ## GitHub to Gitea
 
-Use `run_skill_script(skill_name="repo-sync", script_name="sync_github_to_gitea.py", args={...})`
+Use `run_skill_script(skill_name="repo-sync", script_name="scripts/sync_github_to_gitea.py", args={...})`
 to force-push GitHub `main` to Gitea `main`.
 
 Before the force-push runs, the script queries the Gitea repository and refuses
@@ -52,7 +53,7 @@ Example:
 ```python
 await run_skill_script(
     skill_name="repo-sync",
-    script_name="sync_github_to_gitea.py",
+    script_name="scripts/sync_github_to_gitea.py",
     args={
         "repo_dir": "/path/to/repo",
         "owner": "autonomous",
@@ -71,7 +72,7 @@ PR title and body.
 
 ### Step 1: list unsynced commits
 
-Use `run_skill_script(skill_name="repo-sync", script_name="sync_gitea_to_github.py", args={...})`
+Use `run_skill_script(skill_name="repo-sync", script_name="scripts/sync_gitea_to_github.py", args={...})`
 with `command="list"` to discover which Gitea commits are not yet represented
 on GitHub `main` or in open GitHub pull requests.
 
@@ -93,7 +94,7 @@ Example:
 ```python
 await run_skill_script(
     skill_name="repo-sync",
-    script_name="sync_gitea_to_github.py",
+    script_name="scripts/sync_gitea_to_github.py",
     args={
         "command": "list",
         "repo_dir": "/path/to/repo",
@@ -129,7 +130,7 @@ Example:
 ```python
 await run_skill_script(
     skill_name="repo-sync",
-    script_name="sync_gitea_to_github.py",
+    script_name="scripts/sync_gitea_to_github.py",
     args={
         "command": "sync",
         "repo_dir": "/path/to/repo",
