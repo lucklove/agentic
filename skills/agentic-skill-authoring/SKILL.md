@@ -206,6 +206,35 @@ Add them only when they increase clarity or repeatability.
 
 ### 8. Follow script conventions when automation is needed
 
+Treat `scripts/` as an implementation detail of the skill package. In normal
+agent use, a skill script should be invoked through `run_skill_script(...)`
+after `load_skill(...)`, not by telling the agent to shell into
+`skills/<skill-name>/scripts/...` directly.
+
+When you document a script, show the runtime-facing invocation shape:
+
+```python
+await run_skill_script(
+    skill_name="my-skill",
+    script_name="summarize.py",
+    args={
+        "region": "us-east-1",
+        "dry_run": True,
+    },
+)
+```
+
+Authoring rules for script guidance:
+
+- Use the exact basename that future agents should pass as `script_name`, such
+  as `summarize.py`.
+- Describe inputs in terms of the `args={...}` object, not raw shell quoting.
+- Document what the script prints, returns, or changes so callers know how to
+  use the result.
+- Do not require callers to discover `SKILL_PATH`, compute script directories,
+  or invoke `bash skills/.../scripts/...` unless that direct shell execution is
+  itself the workflow being documented.
+
 Supported script styles depend on the runtime, but these conventions are safe
 for this repository:
 
@@ -241,8 +270,8 @@ if __name__ == "__main__":
     main()
 ```
 
-If an extensionless script must be invoked directly, make it executable and say
-so in the skill instructions.
+If a script depends on direct execution behavior, say so explicitly in the skill
+instructions and explain why `run_skill_script(...)` is not enough in that case.
 
 ### 9. Prefer predictable CLI argument conventions
 
