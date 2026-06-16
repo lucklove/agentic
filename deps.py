@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from pydantic_ai_backends import LocalBackend
 
@@ -26,6 +28,7 @@ class AgentDeps:
     gitea_username: str
     gitea_base_url: str
     gitea_token: str
+    http_client_factory: Callable[[str, str], Any] | None = None
     notification_subject: NotificationSubject | None = None
     profile_name: str = ""
     messages_dir: Path | None = None

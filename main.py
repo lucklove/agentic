@@ -42,11 +42,13 @@ from typing import NamedTuple, TextIO
 import httpx
 import logfire
 from pydantic_ai import Agent
+from pydantic_ai.messages import ModelMessage
 from pydantic_ai_backends import LocalBackend
 
 from agent_factory import make_agent
 from config import ProfileConfig, load_global_config, load_profile
-from deps import AgentDeps
+from conversation import load_history, save_history, subject_message_key
+from deps import AgentDeps, NotificationSubject
 from poller import poll_forever
 
 _HERE = Path(__file__).parent
@@ -105,6 +107,67 @@ async def _resolve_username(base_url: str, token: str) -> str:
         resp = await client.get("/api/v1/user")
         resp.raise_for_status()
         return resp.json()["login"]
+
+
+def _make_gitea_client(base_url: str, token: str) -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        base_url=base_url,
+        headers={"Authorization": f"token {token}"},
+    )
+
+
+def _parse_attach_target(attach: str) -> tuple[str, str, str, str]:
+    candidate = attach.strip()
+    if not candidate:
+        raise ValueError("attach target cannot be empty")
+
+    if "://" in candidate:
+        parsed = httpx.URL(candidate)
+    else:
+        parsed = httpx.URL("https://attach.local/" + candidate.lstrip("/"))
+    segments = [segment for segment in parsed.path.split("/") if segment]
+
+    if len(segments) != 4 or segments[2] not in {"issues", "pulls"}:
+        raise ValueError(
+            "attach target must look like <owner>/<repo>/issues/<number> or <owner>/<repo>/pulls/<number>"
+        )
+
+    owner, repo, path_kind, number = segments
+    if not number.isdigit():
+        raise ValueError("attach target number must be numeric")
+
+    subject_type = "Issue" if path_kind == "issues" else "Pull"
+    return owner, repo, subject_type, number
+
+
+async def _load_attach_history(
+    deps: AgentDeps,
+    attach: str,
+) -> tuple[NotificationSubject, list[ModelMessage]]:
+    owner, repo, subject_type, number = _parse_attach_target(attach)
+    path_kind = "issues" if subject_type == "Issue" else "pulls"
+    client_factory = deps.http_client_factory or _make_gitea_client
+
+    async with client_factory(deps.gitea_base_url, deps.gitea_token) as client:
+        response = await client.get(
+            f"/api/v1/repos/{owner}/{repo}/{path_kind}/{number}"
+        )
+        response.raise_for_status()
+
+    history: list[ModelMessage] = []
+    if deps.messages_dir is not None:
+        key = subject_message_key(owner, repo, number)
+        history = load_history(deps.messages_dir, key)
+
+    return (
+        NotificationSubject(
+            owner=owner,
+            repo=repo,
+            number=number,
+            subject_type=subject_type,
+        ),
+        history,
+    )
 
 
 def _profile_lock_metadata(profile_name: str) -> dict[str, str | int]:
@@ -247,6 +310,7 @@ async def run_instruction(
     instruction: str,
     global_config_path: Path,
     profiles_root: Path,
+    attach: str | None = None,
 ) -> None:
     logfire.configure(
         send_to_logfire="if-token-present",
@@ -257,8 +321,40 @@ async def run_instruction(
 
     with profile_lock(profiles_root, profile_name):
         runtime = await _build_runtime(profile_name, global_config_path, profiles_root)
+        run_deps = runtime.deps
+        history = None
+        attached_key = None
+
+        if attach is not None:
+            notification_subject, loaded_history = await _load_attach_history(
+                runtime.deps,
+                attach,
+            )
+            run_deps = AgentDeps(
+                backend=runtime.deps.backend,
+                gitea_username=runtime.deps.gitea_username,
+                gitea_base_url=runtime.deps.gitea_base_url,
+                gitea_token=runtime.deps.gitea_token,
+                http_client_factory=runtime.deps.http_client_factory,
+                notification_subject=notification_subject,
+                profile_name=runtime.deps.profile_name,
+                messages_dir=runtime.deps.messages_dir,
+            )
+            history = loaded_history or None
+            attached_key = subject_message_key(
+                notification_subject.owner,
+                notification_subject.repo,
+                notification_subject.number,
+            )
+
         async with runtime.agent:
-            result = await runtime.agent.run(instruction, deps=runtime.deps)
+            result = await runtime.agent.run(
+                instruction,
+                deps=run_deps,
+                message_history=history,
+            )
+            if run_deps.messages_dir is not None and attached_key is not None:
+                save_history(run_deps.messages_dir, attached_key, result.all_messages())
             print(result.output)
 
 
@@ -295,6 +391,15 @@ if __name__ == "__main__":
         "-i",
         help="Run one profile once with this instruction instead of polling",
     )
+    parser.add_argument(
+        "--attach",
+        "-a",
+        help=(
+            "Attach --instruction to an existing issue or pull request and load its "
+            "saved message history; accepts <owner>/<repo>/issues/<number>, "
+            "<owner>/<repo>/pulls/<number>, or the full URL"
+        ),
+    )
     args = parser.parse_args()
 
     global_config_path = args.config.expanduser()
@@ -314,6 +419,9 @@ if __name__ == "__main__":
     if args.instruction and len(profile_names) != 1:
         parser.error("--instruction requires exactly one profile")
 
+    if args.attach and not args.instruction:
+        parser.error("--attach requires --instruction")
+
     try:
         if args.instruction:
             asyncio.run(
@@ -322,12 +430,19 @@ if __name__ == "__main__":
                     args.instruction,
                     global_config_path,
                     profiles_root,
+                    attach=args.attach,
                 )
             )
         else:
             asyncio.run(run_profiles(profile_names, global_config_path, profiles_root))
     except ProfileLockError as exc:
         print(exc, file=sys.stderr)
+        raise SystemExit(1) from None
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        raise SystemExit(1) from None
+    except httpx.HTTPStatusError as exc:
+        print(f"attach target lookup failed: {exc}", file=sys.stderr)
         raise SystemExit(1) from None
     except KeyboardInterrupt:
         print("Interrupted.")

@@ -103,11 +103,10 @@ def visible_comments(
 def subject_message_key(
     owner: str,
     repo: str,
-    subject_type: str,
     number: str,
 ) -> str:
     """Return a stable hex key for an issue/PR suitable as a filename."""
-    raw = f"{owner}/{repo}/{subject_type}/{number}"
+    raw = f"{owner}/{repo}/{number}"
     return hashlib.md5(raw.encode()).hexdigest()
 
 

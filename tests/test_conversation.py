@@ -109,21 +109,21 @@ def test_visible_comments_empty_list() -> None:
 
 
 def test_subject_message_key_deterministic() -> None:
-    key1 = subject_message_key("owner", "repo", "Issue", "42")
-    key2 = subject_message_key("owner", "repo", "Issue", "42")
+    key1 = subject_message_key("owner", "repo", "42")
+    key2 = subject_message_key("owner", "repo", "42")
     assert key1 == key2
     assert len(key1) == 32
 
 
-def test_subject_message_key_differs_by_type() -> None:
-    key_issue = subject_message_key("owner", "repo", "Issue", "42")
-    key_pr = subject_message_key("owner", "repo", "Pull", "42")
-    assert key_issue != key_pr
+def test_subject_message_key_same_for_issue_and_pr_number() -> None:
+    issue_key = subject_message_key("owner", "repo", "42")
+    pr_key = subject_message_key("owner", "repo", "42")
+    assert issue_key == pr_key
 
 
 def test_subject_message_key_differs_by_number() -> None:
-    key_1 = subject_message_key("owner", "repo", "Issue", "1")
-    key_2 = subject_message_key("owner", "repo", "Issue", "2")
+    key_1 = subject_message_key("owner", "repo", "1")
+    key_2 = subject_message_key("owner", "repo", "2")
     assert key_1 != key_2
 
 

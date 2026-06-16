@@ -376,7 +376,6 @@ async def _handle_notification(
                 key = subject_message_key(
                     notif_ctx.owner,
                     notif_ctx.repo,
-                    notif_ctx.subject_type,
                     notif_ctx.number,
                 )
                 history = load_history(run_deps.messages_dir, key)

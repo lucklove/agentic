@@ -8,6 +8,8 @@ Gitea-notification-driven agent runner. Each profile in `~/.agentic/<profile>/pr
 uv run main.py                                        # poll every ~/.agentic/*/profile.yaml
 uv run main.py <profile-name> [<profile-name> ...]  # poll one or more profiles concurrently
 uv run main.py <profile-name> -i "instruction"      # run one profile once, print model output, do not poll
+uv run main.py <profile-name> -i "instruction" -a autonomous/agentic/issues/160
+                                                # attach the one-shot run to an existing issue/PR and load saved history
 uv run main.py --config /path/to/agentic.yaml       # override the global config file path
 uv run main.py --profiles-root /path/to/profiles    # override the root containing named profile subdirectories
 uv run main.py --help                               # verify CLI shape after entrypoint edits
@@ -34,7 +36,7 @@ Profile instruction templating uses `string.Template.safe_substitute`; use `$git
 
 ## Runtime Flow
 
-`main.py` loads `~/.agentic/agentic.yaml`, loads each requested profile, resolves the token's Gitea login with `GET /api/v1/user`, builds an agent, then either starts `poll_forever` or runs the direct `--instruction` path.
+`main.py` loads `~/.agentic/agentic.yaml`, loads each requested profile, resolves the token's Gitea login with `GET /api/v1/user`, builds an agent, then either starts `poll_forever` or runs the direct `--instruction` path. When `--attach/-a` is paired with `--instruction`, the one-shot run targets an existing issue or pull request, validates that the subject exists even if it is already closed or merged, and preloads the saved message history for that thread.
 
 Polling opens `async with agent` once per profile, which starts profile-scoped capability lifecycles such as the Gitea MCP subprocess. A poll reads unread notifications, keeps only `Issue` and `Pull`, skips closed or dependency-blocked subjects, then checks whether the last issue comment mentions the current agent or whether the agent is otherwise relevant by role before calling `agent.run(...)`.
 
