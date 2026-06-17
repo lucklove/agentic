@@ -23,7 +23,9 @@ from typing import Any
 import httpx
 import logfire
 from pydantic_ai import Agent
+from pydantic_ai.retries import AsyncTenacityTransport, RetryConfig, wait_retry_after
 from pydantic_ai.usage import UsageLimits
+from tenacity import RetryCallState, retry_if_exception_type, wait_exponential
 
 from conversation import (
     is_conversation_comment,
@@ -430,6 +432,59 @@ async def poll_once(
         )
 
 
+def _validate_retryable_gitea_response(response: httpx.Response) -> None:
+    """Raise for transient Gitea HTTP responses that should be retried."""
+    if response.status_code in {429, 502, 503, 504}:
+        response.raise_for_status()
+
+
+def _log_retrying_gitea_request(retry_state: RetryCallState) -> None:
+    """Log the last transient failure before tenacity sleeps and retries."""
+    if retry_state.outcome is None or not retry_state.outcome.failed:
+        return
+
+    error = retry_state.outcome.exception()
+    if error is None:
+        return
+
+    retry_delay_seconds = (
+        retry_state.next_action.sleep if retry_state.next_action else None
+    )
+
+    logfire.info(
+        f"gitea request failed, retrying after {retry_delay_seconds} seconds",
+        error_message=str(error),
+        attempt=retry_state.attempt_number,
+        retry_delay_seconds=retry_delay_seconds,
+    )
+
+
+def _build_gitea_http_client(
+    base_url: str, headers: dict[str, str]
+) -> httpx.AsyncClient:
+    """Create an httpx client with tenacity retry for transient Gitea failures."""
+    transport = AsyncTenacityTransport(
+        config=RetryConfig(
+            retry=retry_if_exception_type(
+                (
+                    httpx.HTTPStatusError,
+                    httpx.TimeoutException,
+                    httpx.ConnectError,
+                    httpx.ReadError,
+                )
+            ),
+            wait=wait_retry_after(
+                fallback_strategy=wait_exponential(multiplier=1, max=30),
+                max_wait=120,
+            ),
+            before_sleep=_log_retrying_gitea_request,
+            reraise=True,
+        ),
+        validate_response=_validate_retryable_gitea_response,
+    )
+    return httpx.AsyncClient(base_url=base_url, headers=headers, transport=transport)
+
+
 async def poll_forever(
     agent: Agent[AgentDeps, str],
     interval: int,
@@ -452,7 +507,7 @@ async def poll_forever(
         "Content-Type": "application/json",
     }
 
-    async with httpx.AsyncClient(base_url=deps.gitea_base_url, headers=headers) as http:
+    async with _build_gitea_http_client(deps.gitea_base_url, headers) as http:
         async with agent:  # starts the Gitea MCP subprocess
             while True:
                 await poll_once(agent, http, deps, request_limit=request_limit)
