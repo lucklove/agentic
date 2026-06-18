@@ -13,6 +13,7 @@ from agent_factory import _build_registry
 from capabilities.harness import HarnessCapability
 from config import GiteaGlobalConfig, GiteaProfileConfig, GlobalConfig, ProfileConfig
 from deps import AgentDeps
+from pydantic_ai_harness import CodeMode
 
 
 def _registry() -> dict:
@@ -63,6 +64,77 @@ def test_registry_builds_harness() -> None:
     capability = _registry()["harness"]({})
 
     assert isinstance(capability, HarnessCapability)
+
+
+def test_registry_builds_code_exec_with_mount_from_profile_working_dir(
+    tmp_path: Path,
+) -> None:
+    profile_work = tmp_path / "profile_work"
+    profile_work.mkdir()
+    global_work = tmp_path / "global_work"
+    global_work.mkdir()
+
+    global_cfg = GlobalConfig(
+        gitea=GiteaGlobalConfig(base_url="http://gitea.example", mcp_command=[]),
+        working_dir=str(global_work),
+    )
+    profile = ProfileConfig(
+        model="openai-responses:gpt-5.5",
+        model_settings={},
+        gitea=GiteaProfileConfig(token="token"),
+        instructions="test",
+        working_dir=str(profile_work),
+    )
+    capability = _build_registry(global_cfg, profile)["code_exec"]({})
+
+    assert isinstance(capability, CodeMode)
+    assert capability.mount is not None
+    assert capability.mount.virtual_path == str(profile_work)
+    assert capability.mount.host_path == str(profile_work)
+
+
+def test_registry_builds_code_exec_falls_back_to_global_working_dir(
+    tmp_path: Path,
+) -> None:
+    global_work = tmp_path / "global_work"
+    global_work.mkdir()
+
+    global_cfg = GlobalConfig(
+        gitea=GiteaGlobalConfig(base_url="http://gitea.example", mcp_command=[]),
+        working_dir=str(global_work),
+    )
+    profile = ProfileConfig(
+        model="openai-responses:gpt-5.5",
+        model_settings={},
+        gitea=GiteaProfileConfig(token="token"),
+        instructions="test",
+    )
+    capability = _build_registry(global_cfg, profile)["code_exec"]({})
+
+    assert isinstance(capability, CodeMode)
+    assert capability.mount is not None
+    assert capability.mount.virtual_path == str(global_work)
+    assert capability.mount.host_path == str(global_work)
+
+
+def test_registry_builds_code_exec_passes_opts(tmp_path: Path) -> None:
+    global_cfg = GlobalConfig(
+        gitea=GiteaGlobalConfig(base_url="http://gitea.example", mcp_command=[]),
+        working_dir=str(tmp_path),
+    )
+    profile = ProfileConfig(
+        model="openai-responses:gpt-5.5",
+        model_settings={},
+        gitea=GiteaProfileConfig(token="token"),
+        instructions="test",
+    )
+    capability = _build_registry(global_cfg, profile)["code_exec"](
+        {"max_retries": 5, "dynamic_catalog": True}
+    )
+
+    assert isinstance(capability, CodeMode)
+    assert capability.max_retries == 5
+    assert capability.dynamic_catalog is True
 
 
 def test_make_agent_passes_model_settings() -> None:

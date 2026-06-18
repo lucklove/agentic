@@ -26,6 +26,7 @@ from pydantic_ai.models.anthropic import AnthropicCompaction
 from pydantic_ai.models.openai import OpenAICompaction
 from pydantic_ai_backends import ConsoleCapability
 from pydantic_ai_backends.permissions.presets import PERMISSIVE_RULESET
+from pydantic_monty import MountDir
 from pydantic_ai_harness import CodeMode
 from pydantic_ai_skills import SkillsCapability, discover_skills
 
@@ -45,6 +46,14 @@ _CapabilityFactory = Callable[[dict[str, Any]], AbstractCapability]
 
 _AGENTIC_DIR = Path.home() / ".agentic"
 _SKILLS_DIR_BASE = Path(__file__).resolve().parent
+
+
+def _resolve_working_dir(working_dir: str) -> Path:
+    """Resolve *working_dir* to an absolute path (relative to agent_factory.py dir)."""
+    resolved = Path(working_dir).expanduser()
+    if not resolved.is_absolute():
+        resolved = _SKILLS_DIR_BASE / resolved
+    return resolved.resolve()
 
 
 def _make_skills_capability(
@@ -90,8 +99,14 @@ def _build_registry(
         else ".memories.json"
     )
 
+    raw_working_dir = profile.working_dir or global_cfg.working_dir
+    working_dir = _resolve_working_dir(raw_working_dir)
+
     return {
-        "code_exec": lambda opts: CodeMode(),
+        "code_exec": lambda opts: CodeMode(
+            **opts,
+            mount=MountDir(str(working_dir), str(working_dir), mode="read-write"),
+        ),
         "gitea": lambda opts: make_gitea_capability(
             base_url=global_cfg.gitea.base_url,
             mcp_command=global_cfg.gitea.mcp_command,
