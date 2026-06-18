@@ -70,6 +70,19 @@ gitea:
     assert config.agent_request_limit == 100
 
 
+def test_load_global_config_ignores_legacy_skills_dir(tmp_path: Path) -> None:
+    path = tmp_path / "agentic.yaml"
+    path.write_text("""
+gitea:
+  base_url: http://gitea.example
+skills_dir: /tmp/legacy-skills
+""")
+
+    config = load_global_config(path)
+
+    assert not hasattr(config, "skills_dir")
+
+
 def test_load_profile_reads_optional_working_dir(tmp_path: Path) -> None:
     path = tmp_path / "code_agent.yaml"
     path.write_text("""

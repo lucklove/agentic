@@ -149,7 +149,6 @@ def test_make_agent_rejects_unknown_profile_capability() -> None:
 def test_registry_merges_skills_from_multiple_directories() -> None:
     global_cfg = GlobalConfig(
         gitea=GiteaGlobalConfig(base_url="http://gitea.example", mcp_command=[]),
-        skills_dir="/global-skills",
     )
     profile = ProfileConfig(
         model="openai-responses:gpt-5.5",
@@ -164,7 +163,7 @@ def test_registry_merges_skills_from_multiple_directories() -> None:
                 SimpleNamespace(name="profile-only"),
                 SimpleNamespace(name="shared"),
             ]
-        if skills_dir == str(Path("/global-skills").resolve()):
+        if skills_dir == str(Path("/worktree/skills").resolve()):
             return [SimpleNamespace(name="global-only"), SimpleNamespace(name="shared")]
         raise AssertionError(skills_dir)
 
@@ -175,8 +174,9 @@ def test_registry_merges_skills_from_multiple_directories() -> None:
         return SimpleNamespace(skills=skills)
 
     with patch(
-        "agent_factory.discover_skills", side_effect=fake_discover_skills
-    ), patch(
+        "agent_factory._SKILLS_DIR_BASE",
+        Path("/worktree"),
+    ), patch("agent_factory.discover_skills", side_effect=fake_discover_skills), patch(
         "agent_factory.SkillsCapability",
         side_effect=fake_skills_capability,
     ):
@@ -201,7 +201,6 @@ def test_registry_merges_skills_from_multiple_directories() -> None:
 def test_registry_uses_global_skills_when_profile_skills_dirs_empty() -> None:
     global_cfg = GlobalConfig(
         gitea=GiteaGlobalConfig(base_url="http://gitea.example", mcp_command=[]),
-        skills_dir="/global-skills",
     )
     profile = ProfileConfig(
         model="openai-responses:gpt-5.5",
@@ -217,6 +216,9 @@ def test_registry_uses_global_skills_when_profile_skills_dirs_empty() -> None:
         return SimpleNamespace(skills=skills)
 
     with patch(
+        "agent_factory._SKILLS_DIR_BASE",
+        Path("/worktree"),
+    ), patch(
         "agent_factory.discover_skills",
         return_value=[SimpleNamespace(name="global-only")],
     ) as discover_skills, patch(
@@ -227,15 +229,12 @@ def test_registry_uses_global_skills_when_profile_skills_dirs_empty() -> None:
 
     assert [skill.name for skill in captured] == ["global-only"]
     assert [skill.name for skill in capability.skills] == ["global-only"]
-    discover_skills.assert_called_once_with(str(Path("/global-skills").resolve()))
+    discover_skills.assert_called_once_with(str(Path("/worktree/skills").resolve()))
 
 
-def test_registry_resolves_relative_global_skills_dir_from_agent_factory_directory() -> (
-    None
-):
+def test_registry_uses_repo_skills_directory_from_agent_factory_directory() -> None:
     global_cfg = GlobalConfig(
         gitea=GiteaGlobalConfig(base_url="http://gitea.example", mcp_command=[]),
-        skills_dir="./skills",
     )
     profile = ProfileConfig(
         model="openai-responses:gpt-5.5",
@@ -244,22 +243,18 @@ def test_registry_resolves_relative_global_skills_dir_from_agent_factory_directo
         instructions="test",
     )
 
-    base_dir = Path("/repo/subdir")
-    expected_skills_dir = str((base_dir / "skills").resolve())
+    expected_skills_dir = str(Path("/worktree/skills").resolve())
 
     with patch(
+        "agent_factory._SKILLS_DIR_BASE",
+        Path("/worktree"),
+    ), patch(
         "agent_factory.discover_skills",
         return_value=[SimpleNamespace(name="global-only")],
     ) as discover_skills, patch(
         "agent_factory.SkillsCapability",
         side_effect=lambda *, skills: SimpleNamespace(skills=skills),
     ):
-        _build_registry(
-            global_cfg,
-            profile,
-            global_skills_dir_base=base_dir,
-        )[
-            "skills"
-        ]({})
+        _build_registry(global_cfg, profile)["skills"]({})
 
     discover_skills.assert_called_once_with(expected_skills_dir)

@@ -41,7 +41,6 @@ class GlobalConfig:
     gitea: GiteaGlobalConfig
     instructions: str = ""
     working_dir: str = "."
-    skills_dir: str = "./skills"
     agent_request_limit: int = 100
     # Keys are capability names; values are the option dicts from YAML.
     capabilities: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -71,7 +70,6 @@ def load_global_config(path: str | Path) -> GlobalConfig:
         ),
         instructions=data.get("instructions", ""),
         working_dir=data.get("working_dir", "."),
-        skills_dir=data.get("skills_dir", "./skills"),
         agent_request_limit=int(data.get("agent_request_limit", 100)),
         capabilities=_normalize_capabilities(data.get("capabilities")),
     )

@@ -24,7 +24,7 @@ There is no `pyproject.toml`; runtime dependencies and Python `>=3.14` live in t
 
 ## Configuration
 
-`~/.agentic/agentic.yaml` is the default global Gitea/MCP/skills config. Per-agent config lives at `~/.agentic/<profile>/profile.yaml` by default. You can override these locations with `--config /path/to/agentic.yaml` and `--profiles-root /path/to/profiles`, where the profiles root is the directory containing named profile subdirectories. Keep shared examples in `profiles/example.yaml.template`.
+`~/.agentic/agentic.yaml` is the default global Gitea/MCP config. Shared skills are always loaded from the repository's `./skills` directory, and each profile may add `~/.agentic/<profile>/skills` for local overrides. Per-agent config lives at `~/.agentic/<profile>/profile.yaml` by default. You can override these locations with `--config /path/to/agentic.yaml` and `--profiles-root /path/to/profiles`, where the profiles root is the directory containing named profile subdirectories. Keep shared examples in `profiles/example.yaml.template`.
 
 `working_dir` controls the `LocalBackend` cwd used by command/code execution. It defaults to `.` in `~/.agentic/agentic.yaml` (the `main.py` directory), and can be overridden per profile with `working_dir` in `~/.agentic/<profile>/profile.yaml`. Relative paths are resolved from the `main.py` directory.
 

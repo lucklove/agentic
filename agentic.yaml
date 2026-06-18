@@ -14,10 +14,8 @@ gitea:
 # resolved from this file's directory. Profiles can override this value.
 working_dir: "."
 
-# Directory that contains all available skills (subdirs with SKILL.md).
-# SkillsCapability will discover skills from here; each profile filters
-# by name via capabilities.skills.names.
-skills_dir: "./skills"
+# Skills are always discovered from the repository's ./skills directory,
+# plus an optional ~/.agentic/<profile>/skills override for each profile.
 
 # Maximum pydantic-ai model requests allowed per notification-handling run.
 agent_request_limit: 100

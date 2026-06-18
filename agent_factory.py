@@ -16,7 +16,6 @@ no ``if`` chains needed anywhere. ``code_exec`` is the registry name for
 
 from __future__ import annotations
 
-from os import PathLike
 from pathlib import Path
 from string import Template
 from typing import Any, Callable, Sequence, cast
@@ -48,13 +47,6 @@ _AGENTIC_DIR = Path.home() / ".agentic"
 _SKILLS_DIR_BASE = Path(__file__).resolve().parent
 
 
-def _resolve_path_from_base(path: str | PathLike[str], *, base_dir: Path) -> Path:
-    resolved = Path(path).expanduser()
-    if not resolved.is_absolute():
-        resolved = base_dir / resolved
-    return resolved.resolve()
-
-
 def _make_skills_capability(
     skills_dirs: Sequence[str],
     opts: dict[str, Any],
@@ -80,7 +72,6 @@ def _build_registry(
     *,
     profile_name: str = "",
     profile_skills_dirs: Sequence[Path] = (),
-    global_skills_dir_base: Path = _SKILLS_DIR_BASE,
 ) -> dict[str, _CapabilityFactory]:
     """Return the capability-name → factory map for this profile.
 
@@ -89,9 +80,7 @@ def _build_registry(
     without sharing state between profiles.
     """
     skills_dirs = [str(path.resolve()) for path in profile_skills_dirs]
-    global_skills_dir = str(
-        _resolve_path_from_base(global_cfg.skills_dir, base_dir=global_skills_dir_base)
-    )
+    global_skills_dir = str((_SKILLS_DIR_BASE / "skills").resolve())
     if global_skills_dir not in skills_dirs:
         skills_dirs.append(global_skills_dir)
 
@@ -140,7 +129,7 @@ def make_agent(
 
     Args:
         profile:        Loaded profile config (model, capabilities, instructions…).
-        global_cfg:     Global config (Gitea base URL, MCP command, skills dir).
+        global_cfg:     Global config (Gitea base URL, MCP command).
         deps:           Shared runtime deps. ``gitea_username`` is substituted
                         into instructions as ``$gitea_username``.
         profile_skills_dirs: Optional ordered per-profile skills directories.
