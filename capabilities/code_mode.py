@@ -36,6 +36,16 @@ from pydantic_ai_harness import CodeMode
 from pydantic_ai_harness.code_mode._toolset import CodeModeToolset
 
 
+def _dataclass_init_field_values(instance: Any) -> dict[str, Any]:
+    """Return only dataclass fields accepted by ``__init__`` for *instance*."""
+
+    return {
+        field.name: getattr(instance, field.name)
+        for field in dataclasses.fields(instance)
+        if field.init
+    }
+
+
 @dataclass
 class _RestartingCodeModeToolset(CodeModeToolset[AgentDepsT]):
     """CodeModeToolset that injects ``restart=True`` when the caller omits it.
@@ -83,7 +93,4 @@ class RestartingCodeMode(CodeMode[AgentDepsT]):
         # if the base class gains new fields they are automatically forwarded.
         parent = super().get_wrapper_toolset(toolset)
         assert isinstance(parent, CodeModeToolset)
-        field_values = {
-            f.name: getattr(parent, f.name) for f in dataclasses.fields(parent)
-        }
-        return _RestartingCodeModeToolset(**field_values)
+        return _RestartingCodeModeToolset(**_dataclass_init_field_values(parent))

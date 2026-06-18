@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -11,7 +12,7 @@ from pydantic_ai.models.openai import OpenAICompaction
 from pydantic_ai_harness import CodeMode
 
 from agent_factory import _build_registry
-from capabilities.code_mode import RestartingCodeMode
+from capabilities.code_mode import RestartingCodeMode, _dataclass_init_field_values
 from capabilities.harness import HarnessCapability
 from config import GiteaGlobalConfig, GiteaProfileConfig, GlobalConfig, ProfileConfig
 from deps import AgentDeps
@@ -154,6 +155,15 @@ def test_registry_code_exec_uses_restarting_code_mode(tmp_path: Path) -> None:
     # Ensure the registry produces the restarting subclass, not the bare CodeMode.
     # This test locks in the fix for issue #165: if someone reverts to CodeMode this fails.
     assert isinstance(capability, RestartingCodeMode)
+
+
+def test_dataclass_init_field_values_ignores_non_init_fields() -> None:
+    @dataclass
+    class Example:
+        visible: int
+        hidden: int = field(init=False, default=7)
+
+    assert _dataclass_init_field_values(Example(3)) == {"visible": 3}
 
 
 def test_make_agent_passes_model_settings() -> None:
