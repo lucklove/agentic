@@ -26,11 +26,11 @@ from pydantic_ai.models.anthropic import AnthropicCompaction
 from pydantic_ai.models.openai import OpenAICompaction
 from pydantic_ai_backends import ConsoleCapability
 from pydantic_ai_backends.permissions.presets import PERMISSIVE_RULESET
-from pydantic_monty import MountDir
-from pydantic_ai_harness import CodeMode
 from pydantic_ai_skills import SkillsCapability, discover_skills
+from pydantic_monty import MountDir
 
 from capabilities.base import make_name_filter
+from capabilities.code_mode import RestartingCodeMode
 from capabilities.gitea import make_gitea_capability
 from capabilities.harness import HarnessCapability
 from capabilities.memory import Memory
@@ -103,7 +103,7 @@ def _build_registry(
     working_dir = _resolve_working_dir(raw_working_dir)
 
     return {
-        "code_exec": lambda opts: CodeMode(
+        "code_exec": lambda opts: RestartingCodeMode(
             **opts,
             mount=MountDir(str(working_dir), str(working_dir), mode="read-write"),
         ),
