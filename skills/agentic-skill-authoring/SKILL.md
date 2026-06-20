@@ -255,7 +255,7 @@ For Python helper scripts with dependencies, prefer a `uv` shebang plus a PEP
 723 metadata block so the skill stays self-contained:
 
 ```python
-#!/usr/bin/env -S uv run -q
+#!/usr/bin/env -S uv run -qs
 # /// script
 # requires-python = ">=3.14"
 # dependencies = ["httpx>=0.28"]

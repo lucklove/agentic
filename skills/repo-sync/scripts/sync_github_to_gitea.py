@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv run -q
+#!/usr/bin/env -S uv run -qs
 # /// script
 # requires-python = ">=3.14"
 # dependencies = ["pyyaml>=6.0"]
