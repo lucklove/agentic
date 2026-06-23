@@ -145,8 +145,9 @@ def make_agent(
     Args:
         profile:        Loaded profile config (model, capabilities, instructions…).
         global_cfg:     Global config (Gitea base URL, MCP command).
-        deps:           Shared runtime deps. ``gitea_username`` is substituted
-                        into instructions as ``$gitea_username``.
+        deps:           Shared runtime deps. ``gitea_username`` and ``working_dir``
+                        are substituted into instructions as ``$gitea_username``
+                        and ``$working_dir``.
         profile_skills_dirs: Optional ordered per-profile skills directories.
     """
     registry = _build_registry(
@@ -172,8 +173,11 @@ def make_agent(
         for instruction in [profile.instructions, global_cfg.instructions]
         if instruction
     )
+    raw_working_dir = profile.working_dir or global_cfg.working_dir
+    working_dir = _resolve_working_dir(raw_working_dir)
     instructions = Template(raw_instructions).safe_substitute(
-        gitea_username=deps.gitea_username
+        gitea_username=deps.gitea_username,
+        working_dir=str(working_dir),
     )
 
     return Agent(

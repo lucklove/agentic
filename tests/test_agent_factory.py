@@ -182,6 +182,65 @@ def test_make_agent_appends_global_instructions_after_profile() -> None:
     assert kwargs["instructions"] == "profile first\n\nshared for code_agent"
 
 
+def test_make_agent_substitutes_working_dir_in_instructions(
+    tmp_path: Path,
+) -> None:
+    from agent_factory import make_agent
+
+    work = tmp_path / "work"
+    work.mkdir()
+
+    global_cfg = GlobalConfig(
+        gitea=GiteaGlobalConfig(base_url="http://gitea.example", mcp_command=[]),
+        working_dir=str(work),
+    )
+    profile = ProfileConfig(
+        model="openai-responses:gpt-5.5",
+        model_settings={},
+        gitea=GiteaProfileConfig(token="token"),
+        instructions="workdir is $working_dir",
+    )
+
+    with patch("agent_factory.Agent") as agent_cls, patch(
+        "agent_factory.build_model", return_value="model"
+    ):
+        make_agent(profile, global_cfg, _deps())
+
+    kwargs = agent_cls.call_args.kwargs
+    assert kwargs["instructions"] == f"workdir is {work}"
+
+
+def test_make_agent_substitutes_working_dir_from_profile(
+    tmp_path: Path,
+) -> None:
+    from agent_factory import make_agent
+
+    profile_work = tmp_path / "profile_work"
+    profile_work.mkdir()
+    global_work = tmp_path / "global_work"
+    global_work.mkdir()
+
+    global_cfg = GlobalConfig(
+        gitea=GiteaGlobalConfig(base_url="http://gitea.example", mcp_command=[]),
+        working_dir=str(global_work),
+    )
+    profile = ProfileConfig(
+        model="openai-responses:gpt-5.5",
+        model_settings={},
+        gitea=GiteaProfileConfig(token="token"),
+        instructions="workdir is $working_dir",
+        working_dir=str(profile_work),
+    )
+
+    with patch("agent_factory.Agent") as agent_cls, patch(
+        "agent_factory.build_model", return_value="model"
+    ):
+        make_agent(profile, global_cfg, _deps())
+
+    kwargs = agent_cls.call_args.kwargs
+    assert kwargs["instructions"] == f"workdir is {profile_work}"
+
+
 def test_make_agent_rejects_unknown_global_capability() -> None:
     from agent_factory import make_agent
 
