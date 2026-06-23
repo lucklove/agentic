@@ -89,6 +89,13 @@ class HarnessCapability(AbstractCapability[AgentDeps]):
         output: Any,
     ) -> Any:
         if ctx.deps.run_code_errored and not ctx.deps.memory_modified:
+            # When run_code errors, we force a ModelRetry to require the agent to update memory
+            # before producing its final answer. However, the agent may have already generated
+            # a valid output in this turn — save it here so it isn't lost when we raise.
+            # On the subsequent retry (after memory is updated), before_output_process will return
+            # this saved output instead of the memory-update acknowledgement the agent produces.
+            if ctx.deps.output is None:
+                ctx.deps.output = output
             raise ModelRetry(
                 "run_code encountered an error during this run, but you have not "
                 "updated memory. Before producing your final answer, please do one "
@@ -101,6 +108,8 @@ class HarnessCapability(AbstractCapability[AgentDeps]):
                 "- If the error is trivial or not worth remembering, "
                 "delete a non-existent memory key to acknowledge you've considered it."
             )
+        if ctx.deps.output is not None:
+            return ctx.deps.output
         return output
 
     def _validate_comment_mentions(

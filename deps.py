@@ -34,3 +34,4 @@ class AgentDeps:
     messages_dir: Path | None = None
     run_code_errored: bool = False
     memory_modified: bool = False
+    output: Any = None
