@@ -71,17 +71,25 @@ class HarnessCapability(AbstractCapability[AgentDeps]):
 
         return result
 
-    async def on_tool_execute_error(
+    async def wrap_tool_execute(
         self,
         ctx: RunContext[AgentDeps],
         *,
         call: ToolCallPart,
         tool_def: Any,
         args: dict[str, Any],
-        error: Exception,
-    ) -> None:
-        if tool_def.name == "run_code":
+        handler: Any,
+    ) -> Any:
+        # run_code reports runtime errors by raising ModelRetry, which bypasses
+        # on_tool_execute_error. Wrap the execution so any failure (ModelRetry
+        # included) is recorded before being re-raised.
+        if tool_def.name != "run_code":
+            return await handler(args)
+        try:
+            return await handler(args)
+        except Exception:
             ctx.deps.run_code_errored = True
+            raise
 
     async def before_output_process(
         self,

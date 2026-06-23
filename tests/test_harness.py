@@ -267,38 +267,94 @@ def test_after_tool_execute_preserves_different_agent_marker() -> None:
     assert len(filtered) == 1
 
 
-def test_on_tool_execute_error_marks_run_code_errored(deps: AgentDeps) -> None:
+def test_wrap_tool_execute_marks_run_code_errored_on_model_retry(
+    deps: AgentDeps,
+) -> None:
     cap = HarnessCapability()
     ctx = SimpleNamespace(deps=deps)
     tool_def = SimpleNamespace(name="run_code")
 
-    asyncio.run(
-        cap.on_tool_execute_error(
-            ctx,
-            call=SimpleNamespace(),
-            tool_def=tool_def,
-            args={},
-            error=RuntimeError("sandbox error"),
+    async def handler(args: dict) -> None:
+        raise ModelRetry("Runtime error: name 'x' is not defined")
+
+    with pytest.raises(ModelRetry):
+        asyncio.run(
+            cap.wrap_tool_execute(
+                ctx,
+                call=SimpleNamespace(),
+                tool_def=tool_def,
+                args={},
+                handler=handler,
+            )
         )
-    )
 
     assert deps.run_code_errored is True
 
 
-def test_on_tool_execute_error_ignores_other_tools(deps: AgentDeps) -> None:
+def test_wrap_tool_execute_marks_run_code_errored_on_exception(
+    deps: AgentDeps,
+) -> None:
     cap = HarnessCapability()
     ctx = SimpleNamespace(deps=deps)
-    tool_def = SimpleNamespace(name="gitea_issue_write")
+    tool_def = SimpleNamespace(name="run_code")
 
-    asyncio.run(
-        cap.on_tool_execute_error(
+    async def handler(args: dict) -> None:
+        raise RuntimeError("sandbox error")
+
+    with pytest.raises(RuntimeError):
+        asyncio.run(
+            cap.wrap_tool_execute(
+                ctx,
+                call=SimpleNamespace(),
+                tool_def=tool_def,
+                args={},
+                handler=handler,
+            )
+        )
+
+    assert deps.run_code_errored is True
+
+
+def test_wrap_tool_execute_passes_through_on_success(deps: AgentDeps) -> None:
+    cap = HarnessCapability()
+    ctx = SimpleNamespace(deps=deps)
+    tool_def = SimpleNamespace(name="run_code")
+
+    async def handler(args: dict) -> str:
+        return "ok"
+
+    result = asyncio.run(
+        cap.wrap_tool_execute(
             ctx,
             call=SimpleNamespace(),
             tool_def=tool_def,
             args={},
-            error=RuntimeError("some error"),
+            handler=handler,
         )
     )
+
+    assert result == "ok"
+    assert deps.run_code_errored is False
+
+
+def test_wrap_tool_execute_ignores_other_tools(deps: AgentDeps) -> None:
+    cap = HarnessCapability()
+    ctx = SimpleNamespace(deps=deps)
+    tool_def = SimpleNamespace(name="gitea_issue_write")
+
+    async def handler(args: dict) -> None:
+        raise RuntimeError("some error")
+
+    with pytest.raises(RuntimeError):
+        asyncio.run(
+            cap.wrap_tool_execute(
+                ctx,
+                call=SimpleNamespace(),
+                tool_def=tool_def,
+                args={},
+                handler=handler,
+            )
+        )
 
     assert deps.run_code_errored is False
 
