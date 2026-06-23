@@ -265,3 +265,129 @@ def test_after_tool_execute_preserves_different_agent_marker() -> None:
     )
 
     assert len(filtered) == 1
+
+
+def test_on_tool_execute_error_marks_run_code_errored(deps: AgentDeps) -> None:
+    cap = HarnessCapability()
+    ctx = SimpleNamespace(deps=deps)
+    tool_def = SimpleNamespace(name="run_code")
+
+    asyncio.run(
+        cap.on_tool_execute_error(
+            ctx,
+            call=SimpleNamespace(),
+            tool_def=tool_def,
+            args={},
+            error=RuntimeError("sandbox error"),
+        )
+    )
+
+    assert deps.run_code_errored is True
+
+
+def test_on_tool_execute_error_ignores_other_tools(deps: AgentDeps) -> None:
+    cap = HarnessCapability()
+    ctx = SimpleNamespace(deps=deps)
+    tool_def = SimpleNamespace(name="gitea_issue_write")
+
+    asyncio.run(
+        cap.on_tool_execute_error(
+            ctx,
+            call=SimpleNamespace(),
+            tool_def=tool_def,
+            args={},
+            error=RuntimeError("some error"),
+        )
+    )
+
+    assert deps.run_code_errored is False
+
+
+def test_after_tool_execute_marks_memory_modified_on_save(deps: AgentDeps) -> None:
+    cap = HarnessCapability()
+    ctx = SimpleNamespace(deps=deps)
+    tool_def = SimpleNamespace(name="save_memory")
+
+    asyncio.run(
+        cap.after_tool_execute(
+            ctx,
+            call=SimpleNamespace(),
+            tool_def=tool_def,
+            args={},
+            result="Memory saved: test",
+        )
+    )
+
+    assert deps.memory_modified is True
+
+
+def test_after_tool_execute_marks_memory_modified_on_delete(deps: AgentDeps) -> None:
+    cap = HarnessCapability()
+    ctx = SimpleNamespace(deps=deps)
+    tool_def = SimpleNamespace(name="delete_memory")
+
+    asyncio.run(
+        cap.after_tool_execute(
+            ctx,
+            call=SimpleNamespace(),
+            tool_def=tool_def,
+            args={},
+            result="Memory deleted: test",
+        )
+    )
+
+    assert deps.memory_modified is True
+
+
+def test_before_output_process_raises_when_error_without_memory_update(
+    deps: AgentDeps,
+) -> None:
+    cap = HarnessCapability()
+    deps.run_code_errored = True
+    deps.memory_modified = False
+    ctx = SimpleNamespace(deps=deps)
+
+    with pytest.raises(ModelRetry, match="run_code encountered an error"):
+        asyncio.run(
+            cap.before_output_process(
+                ctx,
+                output_context=None,
+                output="Here is my answer.",
+            )
+        )
+
+
+def test_before_output_process_passes_when_error_with_memory_update(
+    deps: AgentDeps,
+) -> None:
+    cap = HarnessCapability()
+    deps.run_code_errored = True
+    deps.memory_modified = True
+    ctx = SimpleNamespace(deps=deps)
+
+    output = asyncio.run(
+        cap.before_output_process(
+            ctx,
+            output_context=None,
+            output="Here is my answer.",
+        )
+    )
+
+    assert output == "Here is my answer."
+
+
+def test_before_output_process_passes_when_no_error(deps: AgentDeps) -> None:
+    cap = HarnessCapability()
+    deps.run_code_errored = False
+    deps.memory_modified = False
+    ctx = SimpleNamespace(deps=deps)
+
+    output = asyncio.run(
+        cap.before_output_process(
+            ctx,
+            output_context=None,
+            output="Here is my answer.",
+        )
+    )
+
+    assert output == "Here is my answer."

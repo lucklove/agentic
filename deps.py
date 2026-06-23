@@ -32,3 +32,5 @@ class AgentDeps:
     notification_subject: NotificationSubject | None = None
     profile_name: str = ""
     messages_dir: Path | None = None
+    run_code_errored: bool = False
+    memory_modified: bool = False

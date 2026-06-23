@@ -673,12 +673,8 @@ class Memory(AbstractCapability[AgentDepsT]):
         parts: list[str] = [
             "You have access to a persistent memory system. "
             "Use it to save important information that should be remembered across conversations.",
-            "If run_code fails but you later identify the cause and complete the task, "
-            "save that lesson to memory so you do not repeat the failure.",
             "Only save confirmed, reusable lessons. Do not save an assumed capability limitation "
             "unless you verified it from the available tools or instructions.",
-            "If you discover an existing memory is outdated or no longer useful, "
-            "correct it or delete it.",
         ]
         if not self.inject_memories_in_instructions:
             return "\n".join(parts)

@@ -63,10 +63,47 @@ class HarnessCapability(AbstractCapability[AgentDeps]):
         args: dict[str, Any],
         result: Any,
     ) -> Any:
+        if tool_def.name in ("save_memory", "delete_memory"):
+            ctx.deps.memory_modified = True
+
         if tool_def.name == "gitea_issue_read" and args.get("method") == "get_comments":
             return self._filter_comment_read_result(ctx, result)
 
         return result
+
+    async def on_tool_execute_error(
+        self,
+        ctx: RunContext[AgentDeps],
+        *,
+        call: ToolCallPart,
+        tool_def: Any,
+        args: dict[str, Any],
+        error: Exception,
+    ) -> None:
+        if tool_def.name == "run_code":
+            ctx.deps.run_code_errored = True
+
+    async def before_output_process(
+        self,
+        ctx: RunContext[AgentDeps],
+        *,
+        output_context: Any,
+        output: Any,
+    ) -> Any:
+        if ctx.deps.run_code_errored and not ctx.deps.memory_modified:
+            raise ModelRetry(
+                "run_code encountered an error during this run, but you have not "
+                "updated memory. Before producing your final answer, please do one "
+                "of the following:\n"
+                "- Save a new memory with the lesson learned from this error.\n"
+                "- If a relevant memory already exists but you didn't recall it "
+                "(which may have caused the error), recall it and increase its "
+                "importance.\n"
+                "- If an outdated memory caused the error, delete that memory.\n"
+                "- If the error is trivial or not worth remembering, "
+                "delete a non-existent memory key to acknowledge you've considered it."
+            )
+        return output
 
     def _validate_comment_mentions(
         self,
