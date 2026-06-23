@@ -25,7 +25,6 @@ provides.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from types import SimpleNamespace
 from typing import Any, Callable, cast
 
 from fastmcp.client.transports import StdioTransport
@@ -36,28 +35,6 @@ from pydantic_ai.toolsets import AbstractToolset, AgentToolset, FilteredToolset
 from capabilities.base import make_name_filter
 
 __all__ = ["GiteaMCPCapability", "make_gitea_capability"]
-
-
-_GITEA_INSTRUCTIONS = """\
-## Gitea functions
-
-Use `gitea_*` functions for Gitea API actions and server-side repository state, \
-such as issues, pull requests, reviews, labels, assignees, releases, and \
-workflow actions.
-
-Use local filesystem/shell tools for local repository operations when those \
-capabilities are available. Local `git fetch`, `git checkout`, `git worktree`, \
-`git commit`, and `git push` are normal local repository operations.
-
-You may use either `gitea_*` functions or local `git` commands when both fit \
-the task, based on the available tools and the profile's role.
-"""
-
-_GITEA_PULL_REQUEST_READ_INSTRUCTIONS = """\
-When using `gitea_pull_request_read` with method="get_review_comments", pass \
-`review_id`. To read all PR review comments, first call method="get_reviews", \
-then call method="get_review_comments" once per review id.
-"""
 
 
 @dataclass
@@ -72,13 +49,6 @@ class GiteaMCPCapability(AbstractCapability[Any]):
 
     _server: AgentToolset[Any]
     _filter: Callable[[Any], bool] | None  # None → expose all tools
-
-    def get_instructions(self) -> str:
-        instructions = _GITEA_INSTRUCTIONS
-        tool = SimpleNamespace(name="gitea_pull_request_read")
-        if self._filter is None or self._filter(tool):
-            instructions += "\n\n" + _GITEA_PULL_REQUEST_READ_INSTRUCTIONS
-        return instructions
 
     def get_toolset(self) -> AgentToolset[Any]:
         if self._filter is None:

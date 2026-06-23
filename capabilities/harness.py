@@ -18,20 +18,10 @@ from deps import AgentDeps
 
 _MENTION_PATTERN = re.compile(r"(?:^|[^\w`])@[A-Za-z0-9._-]+(?=\W|$)")
 
-_HARNESS_INSTRUCTIONS = """## Harness Rules
-
-- This is a public conversation, and everyone can see your replies.
-- When you want to notify someone, reply a message with @someone.
-- To mention someone without notifying them, wrap it in backticks like `@someone`.
-"""
-
 
 @dataclass
 class HarnessCapability(AbstractCapability[AgentDeps]):
     """Inject shared harness instructions and block invalid tool comments."""
-
-    def get_instructions(self) -> str:
-        return _HARNESS_INSTRUCTIONS
 
     def get_toolset(self) -> FunctionToolset[AgentDeps]:
         async def sleep(seconds: int | float) -> str:

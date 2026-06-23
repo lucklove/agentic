@@ -26,18 +26,6 @@ def deps() -> AgentDeps:
     )
 
 
-def test_instructions_include_shared_rules() -> None:
-    instructions = HarnessCapability().get_instructions()
-
-    assert "Harness Rules" in instructions
-    assert (
-        "This is a public conversation, and everyone can see your replies"
-        in instructions
-    )
-    assert "reply a message with @someone" in instructions
-    assert "wrap it in backticks like `@someone`" in instructions
-
-
 def test_get_toolset_exposes_sleep_tool() -> None:
     cap = HarnessCapability()
 
