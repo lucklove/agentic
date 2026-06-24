@@ -179,7 +179,7 @@ def _build_input_message(
     comments: list[dict[str, Any]],
     last_seen_comment_id: int,
     agent_name: str,
-) -> tuple[str | None, int]:
+) -> tuple[str | None, int, bool]:
     chat_messages = _chat_messages_after(comments, last_seen_comment_id, agent_name)
     mentioned_comments = _mentioned_comments_after(
         comments,
@@ -208,9 +208,13 @@ def _build_input_message(
         )
 
     if not delivered_comment_ids:
-        return None, last_seen_comment_id
+        return None, last_seen_comment_id, False
 
-    return "\n\n".join(message_parts), max(delivered_comment_ids)
+    return (
+        "\n\n".join(message_parts),
+        max(delivered_comment_ids),
+        bool(mentioned_comments),
+    )
 
 
 def _notification_span_name(
@@ -345,11 +349,13 @@ async def _handle_notification(
                 comments,
                 deps.gitea_username,
             )
-            input_message, max_delivered_comment_id = _build_input_message(
-                notif_ctx,
-                comments,
-                last_seen_comment_id,
-                deps.gitea_username,
+            input_message, max_delivered_comment_id, has_mentioned_comments = (
+                _build_input_message(
+                    notif_ctx,
+                    comments,
+                    last_seen_comment_id,
+                    deps.gitea_username,
+                )
             )
 
             if input_message is None:
@@ -370,6 +376,7 @@ async def _handle_notification(
                     number=notif_ctx.number,
                     subject_type=notif_ctx.subject_type,
                 ),
+                has_mentioned_comments=has_mentioned_comments,
             )
 
             # Load message history.

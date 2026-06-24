@@ -118,6 +118,13 @@ class HarnessCapability(AbstractCapability[AgentDeps]):
         tool_name: str,
         args: dict[str, Any],
     ) -> None:
+        if not ctx.deps.has_mentioned_comments:
+            raise ModelRetry(
+                "The current delivered message did not include any direct mention "
+                "to you. Do not post an issue comment with `gitea_issue_write`; "
+                "respond normally in your final answer instead."
+            )
+
         body = args.get("body")
         if not isinstance(body, str):
             return

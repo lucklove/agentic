@@ -52,6 +52,27 @@ def test_before_tool_execute_passes_through_non_comment_tool(deps: AgentDeps) ->
     assert output == args
 
 
+def test_before_tool_execute_blocks_comment_without_mentioned_context(
+    deps: AgentDeps,
+) -> None:
+    cap = HarnessCapability()
+    ctx = SimpleNamespace(deps=deps)
+    tool_def = SimpleNamespace(name="gitea_issue_write")
+    args = {"method": "add_comment", "body": "Done @review_agent"}
+
+    with pytest.raises(
+        ModelRetry, match="current delivered message did not include any direct mention"
+    ):
+        asyncio.run(
+            cap.before_tool_execute(
+                ctx,
+                call=SimpleNamespace(),
+                tool_def=tool_def,
+                args=args,
+            )
+        )
+
+
 def test_before_tool_execute_blocks_comment_without_other_mention(
     deps: AgentDeps,
 ) -> None:
@@ -59,6 +80,8 @@ def test_before_tool_execute_blocks_comment_without_other_mention(
     ctx = SimpleNamespace(deps=deps)
     tool_def = SimpleNamespace(name="gitea_issue_write")
     args = {"method": "add_comment", "body": "Done @code_agent"}
+
+    deps.has_mentioned_comments = True
 
     with pytest.raises(ModelRetry, match="must @mention"):
         asyncio.run(
@@ -79,6 +102,8 @@ def test_before_tool_execute_blocks_comment_with_only_backtick_wrapped_mention(
     tool_def = SimpleNamespace(name="gitea_issue_write")
     args = {"method": "add_comment", "body": "Done `@review_agent`"}
 
+    deps.has_mentioned_comments = True
+
     with pytest.raises(ModelRetry, match="must @mention"):
         asyncio.run(
             cap.before_tool_execute(
@@ -98,6 +123,8 @@ def test_before_tool_execute_blocks_email_like_text(
     tool_def = SimpleNamespace(name="gitea_issue_write")
     args = {"method": "add_comment", "body": "Contact foo@bar for details."}
 
+    deps.has_mentioned_comments = True
+
     with pytest.raises(ModelRetry, match="must @mention"):
         asyncio.run(
             cap.before_tool_execute(
@@ -113,6 +140,7 @@ def test_before_tool_execute_allows_comment_with_other_mention(
     deps: AgentDeps,
 ) -> None:
     cap = HarnessCapability()
+    deps.has_mentioned_comments = True
     ctx = SimpleNamespace(deps=deps)
     tool_def = SimpleNamespace(name="gitea_issue_write")
     args = {"method": "add_comment", "body": "Done @review_agent"}

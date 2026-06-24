@@ -168,8 +168,42 @@ def test_handle_notification_marks_thread_read_after_success(
         assert agent.run_deps.notification_subject.repo == "agentic"
         assert agent.run_deps.notification_subject.number == "31"
         assert agent.run_deps.notification_subject.subject_type == "Issue"
+        assert agent.run_deps.has_mentioned_comments is True
         assert deps.notification_subject is None
+        assert deps.has_mentioned_comments is False
         assert http.patches == ["/api/v1/notifications/threads/123"]
+
+    asyncio.run(run())
+
+
+def test_handle_notification_keeps_mentioned_context_false_for_chat_only(
+    deps: AgentDeps,
+) -> None:
+    chat_body = "<!-- agentic:@code_agent last_seen_comment_id=0 -->\n\nplease continue"
+
+    async def run() -> None:
+        http = FakeHTTP(
+            subject={
+                "state": "open",
+                "closed_at": None,
+                "user": {"login": "human"},
+                "assignees": [],
+            },
+            comments=[
+                {
+                    "id": 1,
+                    "body": chat_body,
+                    "user": {"login": "human"},
+                }
+            ],
+        )
+        agent = PassingAgent()
+
+        await _handle_notification(agent, http, notification(), deps)
+
+        assert agent.run_deps is not None
+        assert agent.run_deps.has_mentioned_comments is False
+        assert deps.has_mentioned_comments is False
 
     asyncio.run(run())
 
