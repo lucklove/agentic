@@ -288,7 +288,9 @@ def test_registry_merges_skills_from_multiple_directories() -> None:
         instructions="test",
     )
 
-    def fake_discover_skills(skills_dir: str) -> list[SimpleNamespace]:
+    def fake_discover_skills(
+        skills_dir: str, script_executor: object = None
+    ) -> list[SimpleNamespace]:
         if skills_dir == str(Path("/profile-skills").resolve()):
             return [
                 SimpleNamespace(name="profile-only"),
@@ -360,7 +362,8 @@ def test_registry_uses_global_skills_when_profile_skills_dirs_empty() -> None:
 
     assert [skill.name for skill in captured] == ["global-only"]
     assert [skill.name for skill in capability.skills] == ["global-only"]
-    discover_skills.assert_called_once_with(str(Path("/worktree/skills").resolve()))
+    assert discover_skills.call_args[0] == (str(Path("/worktree/skills").resolve()),)
+    assert "script_executor" in discover_skills.call_args[1]
 
 
 def test_registry_uses_repo_skills_directory_from_agent_factory_directory() -> None:
@@ -388,4 +391,5 @@ def test_registry_uses_repo_skills_directory_from_agent_factory_directory() -> N
     ):
         _build_registry(global_cfg, profile)["skills"]({})
 
-    discover_skills.assert_called_once_with(expected_skills_dir)
+    assert discover_skills.call_args[0] == (expected_skills_dir,)
+    assert "script_executor" in discover_skills.call_args[1]

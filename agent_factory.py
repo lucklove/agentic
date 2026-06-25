@@ -27,7 +27,11 @@ from pydantic_ai.models.openai import OpenAICompaction
 from pydantic_ai_backends import ConsoleCapability
 from pydantic_ai_backends.permissions.presets import PERMISSIVE_RULESET
 from pydantic_ai_harness import CodeMode
-from pydantic_ai_skills import SkillsCapability, discover_skills
+from pydantic_ai_skills import (
+    LocalSkillScriptExecutor,
+    SkillsCapability,
+    discover_skills,
+)
 from pydantic_monty import MountDir
 
 from capabilities.base import make_name_filter
@@ -61,10 +65,11 @@ def _make_skills_capability(
     opts: dict[str, Any],
 ) -> SkillsCapability:
     """Discover skills from *skills_dirs*, merge by name, apply filters."""
+    executor = LocalSkillScriptExecutor(timeout=opts.get("script_timeout", 600))
     all_skills: list[Any] = []
     seen_names: set[str] = set()
     for skills_dir in skills_dirs:
-        for skill in discover_skills(skills_dir):
+        for skill in discover_skills(skills_dir, script_executor=executor):
             if skill.name in seen_names:
                 continue
             seen_names.add(skill.name)
