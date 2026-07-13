@@ -102,3 +102,33 @@ def test_log_retrying_http_request_ignores_first_attempt_without_error(
     _log_retrying_http_request(retry_state)
 
     info.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "status_code",
+    [429, 500, 502, 503, 504],
+)
+def test_validate_retryable_response_raises_for_retryable_statuses(
+    status_code: int,
+) -> None:
+    from model_factory import _validate_retryable_response
+
+    response = Mock(spec=httpx.Response)
+    response.status_code = status_code
+    response.raise_for_status = Mock(
+        side_effect=httpx.HTTPStatusError("boom", request=Mock(), response=response)
+    )
+
+    with pytest.raises(httpx.HTTPStatusError):
+        _validate_retryable_response(response)
+
+
+def test_validate_retryable_response_does_not_raise_for_other_statuses() -> None:
+    from model_factory import _validate_retryable_response
+
+    response = Mock(spec=httpx.Response)
+    response.status_code = 200
+    response.raise_for_status = Mock()
+
+    _validate_retryable_response(response)
+    response.raise_for_status.assert_not_called()

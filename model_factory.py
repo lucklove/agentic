@@ -46,7 +46,7 @@ _MODEL_BUILDERS: dict[str, _ModelBuilder] = {
 
 def _validate_retryable_response(response: httpx.Response) -> None:
     """Raise for transient HTTP responses that should be retried."""
-    if response.status_code in {429, 502, 503, 504}:
+    if response.status_code in {429, 500, 502, 503, 504}:
         response.raise_for_status()
 
 
