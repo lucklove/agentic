@@ -26,9 +26,15 @@ capabilities:
   code_exec:
   gitea:
   harness:
+  anchored_compaction:
+    enabled: true
+    message_count_threshold: 40
+    tail_turns: 2
   openai_compaction:
+    enabled: true
     token_threshold: 150000
   anthropic_compaction:
+    enabled: true
     token_threshold: 150000
   privacy:
     enabled: true

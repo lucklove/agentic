@@ -22,8 +22,6 @@ from typing import Any, Callable, Sequence, cast
 
 from pydantic_ai import Agent, AgentRetries, ModelSettings
 from pydantic_ai.capabilities import AbstractCapability
-from pydantic_ai.models.anthropic import AnthropicCompaction
-from pydantic_ai.models.openai import OpenAICompaction
 from pydantic_ai_backends import ConsoleCapability
 from pydantic_ai_backends.permissions.presets import PERMISSIVE_RULESET
 from pydantic_ai_harness import CodeMode
@@ -35,6 +33,11 @@ from pydantic_ai_skills import (
 from pydantic_monty import MountDir
 
 from capabilities.base import make_name_filter
+from capabilities.compaction import (
+    AnchoredCompaction,
+    AnthropicCompaction,
+    OpenAICompaction,
+)
 from capabilities.gitea import make_gitea_capability
 from capabilities.harness import HarnessCapability
 from capabilities.memory import Memory
@@ -135,6 +138,7 @@ def _build_registry(
         "privacy": lambda opts: PrivacyCapability.from_spec(opts),
         "openai_compaction": lambda opts: OpenAICompaction(**opts),
         "anthropic_compaction": lambda opts: AnthropicCompaction(**opts),
+        "anchored_compaction": lambda opts: AnchoredCompaction(**opts),
     }
 
 

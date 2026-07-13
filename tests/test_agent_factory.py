@@ -6,11 +6,14 @@ from unittest.mock import patch
 
 import pytest
 from pydantic_ai import ModelSettings
-from pydantic_ai.models.anthropic import AnthropicCompaction
-from pydantic_ai.models.openai import OpenAICompaction
 from pydantic_ai_harness import CodeMode
 
 from agent_factory import _build_registry
+from capabilities.compaction import (
+    AnchoredCompaction,
+    AnthropicCompaction,
+    OpenAICompaction,
+)
 from capabilities.harness import HarnessCapability
 from config import GiteaGlobalConfig, GiteaProfileConfig, GlobalConfig, ProfileConfig
 from deps import AgentDeps
@@ -39,25 +42,61 @@ def _deps() -> AgentDeps:
     )
 
 
+def test_registry_builds_anchored_compaction() -> None:
+    capability = _registry()["anchored_compaction"](
+        {"message_count_threshold": 20, "tail_turns": 3}
+    )
+
+    assert isinstance(capability, AnchoredCompaction)
+    assert capability.message_count_threshold == 20
+    assert capability.tail_turns == 3
+
+
+def test_registry_builds_default_anchored_compaction() -> None:
+    capability = _registry()["anchored_compaction"]({})
+
+    assert isinstance(capability, AnchoredCompaction)
+    assert capability.message_count_threshold == 40
+    assert capability.tail_turns == 2
+
+
 def test_registry_builds_openai_compaction() -> None:
-    capability = _registry()["openai_compaction"]({"token_threshold": 100_000})
+    capability = _registry()["openai_compaction"](
+        {"enabled": True, "token_threshold": 100_000}
+    )
 
     assert isinstance(capability, OpenAICompaction)
+    assert capability.enabled is True
     assert capability.token_threshold == 100_000
 
 
 def test_registry_builds_openai_stateless_compaction() -> None:
-    capability = _registry()["openai_compaction"]({"message_count_threshold": 20})
+    capability = _registry()["openai_compaction"](
+        {"enabled": True, "message_count_threshold": 20}
+    )
 
     assert isinstance(capability, OpenAICompaction)
+    assert capability.enabled is True
+    assert capability.stateless is True
     assert capability.message_count_threshold == 20
 
 
 def test_registry_builds_anthropic_compaction() -> None:
-    capability = _registry()["anthropic_compaction"]({"token_threshold": 100_000})
+    capability = _registry()["anthropic_compaction"](
+        {"enabled": True, "token_threshold": 100_000}
+    )
 
     assert isinstance(capability, AnthropicCompaction)
+    assert capability.enabled is True
     assert capability.token_threshold == 100_000
+
+
+def test_disabled_provider_compactions_do_not_add_model_settings() -> None:
+    openai = _registry()["openai_compaction"]({"enabled": False})
+    anthropic = _registry()["anthropic_compaction"]({"enabled": False})
+
+    assert openai.get_model_settings() is None
+    assert anthropic.get_model_settings()(None) == {}  # type: ignore[arg-type]
 
 
 def test_registry_builds_harness() -> None:

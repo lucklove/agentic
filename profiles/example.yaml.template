@@ -53,10 +53,17 @@ capabilities:
   #   # You can override it with a custom path here.
   #   inject_memories_in_instructions: true
   #   max_instructions_memories: 20
+  # anchored_compaction:
+  #   enabled: true
+  #   message_count_threshold: 40      # compact after this many new messages
+  #   tail_turns: 2                    # keep the newest complete user turns verbatim
+  #   summary_output_tokens: 4096
   # openai_compaction:
+  #   enabled: true
   #   token_threshold: 100000          # stateful OpenAI Responses compaction
-  #   # message_count_threshold: 20    # stateless compaction for ZDR/control
+  #   # message_count_threshold: 20    # stateless /responses/compact mode
   # anthropic_compaction:
+  #   enabled: true
   #   token_threshold: 100000
 
 polling:
