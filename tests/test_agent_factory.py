@@ -432,3 +432,26 @@ def test_registry_uses_repo_skills_directory_from_agent_factory_directory() -> N
 
     assert discover_skills.call_args[0] == (expected_skills_dir,)
     assert "script_executor" in discover_skills.call_args[1]
+
+
+def test_registry_builds_mcp_capability() -> None:
+    from unittest.mock import patch
+
+    global_cfg = GlobalConfig(
+        gitea=GiteaGlobalConfig(base_url="http://gitea.example", mcp_command=[]),
+    )
+    profile = ProfileConfig(
+        model="openai-responses:gpt-5.5",
+        model_settings={},
+        gitea=GiteaProfileConfig(token="token"),
+        instructions="test",
+    )
+
+    registry = _build_registry(global_cfg, profile)
+    assert "mcp" in registry
+
+    with patch("agent_factory.make_mcp_capability") as mock_make:
+        mock_make.return_value = SimpleNamespace(get_toolset=lambda: None)
+        registry["mcp"]({"server": {"command": "uv"}})
+
+    mock_make.assert_called_once_with({"server": {"command": "uv"}})

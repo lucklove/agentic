@@ -40,6 +40,7 @@ from capabilities.compaction import (
 )
 from capabilities.gitea import make_gitea_capability
 from capabilities.harness import HarnessCapability
+from capabilities.mcp_servers import make_mcp_capability
 from capabilities.memory import Memory
 from capabilities.privacy import PrivacyCapability
 from config import GlobalConfig, ProfileConfig
@@ -139,6 +140,7 @@ def _build_registry(
         "openai_compaction": lambda opts: OpenAICompaction(**opts),
         "anthropic_compaction": lambda opts: AnthropicCompaction(**opts),
         "anchored_compaction": lambda opts: AnchoredCompaction(**opts),
+        "mcp": lambda opts: make_mcp_capability(opts),
     }
 
 
