@@ -6,11 +6,17 @@ Wraps ``MCPServerStdio`` in a pydantic-ai capability so that:
   (``async with agent`` starts/stops the subprocess automatically).
 - Profile YAML can restrict which MCP tools the agent may call via
   ``allow`` / ``deny`` lists — the same semantics as the skills filter.
+- Profile YAML can override ``init_timeout`` (default: ``30`` seconds)
+  to wait for the MCP initialization handshake. The pydantic-ai default
+  of 5 seconds is too short when the underlying ``go run @latest`` has
+  to resolve modules and compile from a cold/expired Go module cache
+  (see issue #201).
 
 Profile YAML example::
 
     capabilities:
       gitea:
+        init_timeout: 30        # seconds; default 30
         allow:
           - get_issue
           - list_issue_comments
@@ -67,6 +73,13 @@ def make_gitea_capability(
     opts: dict[str, Any],
 ) -> GiteaMCPCapability:
     """Factory used by the capability registry in ``agent_factory``."""
+    # pydantic_ai's MCPToolset defaults to a 5-second init_timeout, which
+    # is too short for `go run gitea-mcp@latest` when the Go module cache
+    # is cold or expired (the compile + version-resolution step can take
+    # 6-8 seconds). Default to 30s to give the handshake enough headroom
+    # while still failing fast on genuinely broken servers. Profiles may
+    # override via ``init_timeout`` in the capability config.
+    init_timeout: float = float(opts.get("init_timeout", 30))
     server = MCPToolset(
         StdioTransport(
             mcp_command[0],
@@ -85,6 +98,7 @@ def make_gitea_capability(
             },
         ),
         include_instructions=False,
+        init_timeout=init_timeout,
     ).prefixed("gitea")
     return GiteaMCPCapability(
         _server=server,
