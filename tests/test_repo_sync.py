@@ -49,68 +49,66 @@ def test_build_gitea_url_uses_token_owner_and_repo() -> None:
     assert url == "http://secret-token@gitea.ai/autonomous/docker-image-controller.git"
 
 
-def test_discover_github_url_prefers_origin_when_multiple(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        GITHUB_TO_GITEA,
-        "git_remote_lines",
-        lambda repo_dir: [
-            (
-                "upstream",
-                "git@github.com:tidbcloud/docker-image-controller.git",
-                "fetch",
-            ),
-            (
-                "origin",
-                "https://github.com/tidbcloud/docker-image-controller.git",
-                "fetch",
-            ),
-        ],
+def test_build_github_ssh_url() -> None:
+    url = GITHUB_TO_GITEA.build_github_ssh_url("tidbcloud", "auto-deploy")
+    assert url == "git@github.com:tidbcloud/auto-deploy.git"
+
+
+def test_build_github_ssh_url_custom_owner() -> None:
+    url = GITHUB_TO_GITEA.build_github_ssh_url("myorg", "myrepo")
+    assert url == "git@github.com:myorg/myrepo.git"
+
+
+def test_gitea_to_github_build_github_ssh_url() -> None:
+    url = GITEA_TO_GITHUB.build_github_ssh_url("tidbcloud", "auto-deploy")
+    assert url == "git@github.com:tidbcloud/auto-deploy.git"
+
+
+def test_github_repo_name_from_ssh_url() -> None:
+    name = GITEA_TO_GITHUB.github_repo_name("git@github.com:tidbcloud/auto-deploy.git")
+    assert name == "tidbcloud/auto-deploy"
+
+
+def test_github_repo_name_from_ssh_url_without_git_suffix() -> None:
+    name = GITEA_TO_GITHUB.github_repo_name("git@github.com:tidbcloud/auto-deploy")
+    assert name == "tidbcloud/auto-deploy"
+
+
+def test_github_repo_name_from_https_url() -> None:
+    name = GITEA_TO_GITHUB.github_repo_name(
+        "https://github.com/tidbcloud/auto-deploy.git"
     )
-
-    url = GITHUB_TO_GITEA.discover_github_url(Path("/tmp/repo"))
-
-    assert url == "https://github.com/tidbcloud/docker-image-controller.git"
+    assert name == "tidbcloud/auto-deploy"
 
 
-def test_discover_github_url_requires_explicit_url_when_ambiguous(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        GITHUB_TO_GITEA,
-        "git_remote_lines",
-        lambda repo_dir: [
-            (
-                "upstream",
-                "git@github.com:tidbcloud/docker-image-controller.git",
-                "fetch",
-            ),
-            ("mirror", "https://github.com/acme/docker-image-controller.git", "fetch"),
-        ],
+def test_github_repo_name_rejects_invalid() -> None:
+    import argparse
+
+    with pytest.raises(argparse.ArgumentTypeError, match="invalid GitHub repo URL"):
+        GITEA_TO_GITHUB.github_repo_name("not-a-url")
+
+
+def test_gitea_repo_name_extracts_owner_and_repo() -> None:
+    name = GITEA_TO_GITHUB.gitea_repo_name(
+        "https://token@gitea.ai/autonomous/agentic.git"
     )
+    assert name == "autonomous/agentic"
+    name2 = GITEA_TO_GITHUB.gitea_repo_name("http://gitea.ai/autonomous/agentic.git")
+    assert name2 == "autonomous/agentic"
 
-    with pytest.raises(SystemExit, match="multiple GitHub fetch remotes"):
-        GITHUB_TO_GITEA.discover_github_url(Path("/tmp/repo"))
 
-
-def test_discover_github_url_requires_github_remote(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        GITHUB_TO_GITEA,
-        "git_remote_lines",
-        lambda repo_dir: [
-            (
-                "origin",
-                "https://gitea.ai/autonomous/docker-image-controller.git",
-                "fetch",
-            )
-        ],
+def test_gitea_repo_name_with_install_prefix() -> None:
+    name = GITEA_TO_GITHUB.gitea_repo_name(
+        "https://token@gitea.example/git/autonomous/agentic.git"
     )
+    assert name == "autonomous/agentic"
 
-    with pytest.raises(SystemExit, match="could not find a GitHub fetch remote"):
-        GITHUB_TO_GITEA.discover_github_url(Path("/tmp/repo"))
+
+def test_gitea_repo_name_rejects_invalid() -> None:
+    import argparse
+
+    with pytest.raises(argparse.ArgumentTypeError, match="invalid Gitea repo URL"):
+        GITEA_TO_GITHUB.gitea_repo_name("https://gitea.ai/single")
 
 
 def test_discover_gitea_url_reads_configs(tmp_path: Path) -> None:

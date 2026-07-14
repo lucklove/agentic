@@ -3,7 +3,7 @@
 # requires-python = ">=3.14"
 # dependencies = []
 # ///
-"""Cherry-pick unsynced Gitea commits to GitHub and open pull requests."""
+"""Clone from Gitea and cherry-pick unsynced commits to GitHub via PRs."""
 
 from __future__ import annotations
 
@@ -19,9 +19,15 @@ CREDENTIAL_URL_RE = re.compile(r"(https?://)[^\s/@]+@")
 TRAILING_PR_RE = re.compile(r"\s*\(#[0-9]+\)\s*$")
 ISSUE_REF_RE = re.compile(r"(?<!\w)#[0-9]+\b")
 NON_SLUG_RE = re.compile(r"[^a-z0-9]+")
+SSH_GITHUB_URL_RE = re.compile(r"^[^@\s]+@github\.com:(.+?)(?:\.git)?$")
 
 
 def github_repo_name(github_url: str) -> str:
+    ssh_match = SSH_GITHUB_URL_RE.match(github_url)
+    if ssh_match:
+        path = ssh_match.group(1)
+        if path and "/" in path:
+            return path
     parts = urlsplit(github_url)
     path = parts.path.removeprefix("/")
     if path.endswith(".git"):
@@ -29,6 +35,25 @@ def github_repo_name(github_url: str) -> str:
     if not path or "/" not in path:
         raise argparse.ArgumentTypeError(f"invalid GitHub repo URL: {github_url}")
     return path
+
+
+def build_github_ssh_url(github_owner: str, repo: str) -> str:
+    return f"git@github.com:{github_owner}/{repo}.git"
+
+
+def gitea_repo_name(gitea_url: str) -> str:
+    """Extract owner/repo from a Gitea URL like https://token@host/owner/repo.git."""
+    parts = urlsplit(gitea_url)
+    path = parts.path.removeprefix("/")
+    if path.endswith(".git"):
+        path = path[:-4]
+    if not path or "/" not in path:
+        raise argparse.ArgumentTypeError(f"invalid Gitea repo URL: {gitea_url}")
+    # Take the last two path segments as owner/repo
+    segments = [s for s in path.split("/") if s]
+    if len(segments) < 2:
+        raise argparse.ArgumentTypeError(f"invalid Gitea repo URL: {gitea_url}")
+    return "/".join(segments[-2:])
 
 
 def gitea_url_pattern(gitea_url: str) -> re.Pattern[str]:
@@ -116,15 +141,6 @@ def git(
 
 def git_capture(repo_dir: Path, *args: str, check: bool = True) -> str:
     return capture(["git", "-C", str(repo_dir), *args], check=check)
-
-
-def git_repo(path: str) -> Path:
-    repo_dir = Path(path).expanduser().resolve()
-    if not repo_dir.is_dir():
-        raise argparse.ArgumentTypeError(f"repo dir does not exist: {repo_dir}")
-    if not (repo_dir / ".git").exists():
-        raise argparse.ArgumentTypeError(f"not a git repo: {repo_dir}")
-    return repo_dir
 
 
 def core_title(title: str) -> str:
@@ -264,9 +280,9 @@ def parse_args() -> argparse.Namespace:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     def add_shared_arguments(command_parser: argparse.ArgumentParser) -> None:
-        command_parser.add_argument("--repo-dir", required=True, type=git_repo)
+        command_parser.add_argument("--repo-dir", required=True, type=Path)
         command_parser.add_argument("--gitea-url", required=True)
-        command_parser.add_argument("--github-url", required=True)
+        command_parser.add_argument("--github-owner", default="tidbcloud")
         command_parser.add_argument("--github-repo")
         command_parser.add_argument("--main-branch", default="main")
 
@@ -285,8 +301,10 @@ def parse_args() -> argparse.Namespace:
     sync_parser.add_argument("--dry-run", action="store_true")
 
     args = parser.parse_args()
+    repo_name = gitea_repo_name(args.gitea_url).split("/")[-1]
+    args.github_url = build_github_ssh_url(args.github_owner, repo_name)
     if not args.github_repo:
-        args.github_repo = github_repo_name(args.github_url)
+        args.github_repo = f"{args.github_owner}/{repo_name}"
     args.gitea_url_re = gitea_url_pattern(args.gitea_url)
     return args
 
@@ -350,7 +368,12 @@ def create_sync_pr(
     return "synced"
 
 
+def clone_from_gitea(repo_dir: Path, gitea_url: str) -> None:
+    subprocess_run(["git", "clone", gitea_url, str(repo_dir)])
+
+
 def list_commits(args: argparse.Namespace) -> None:
+    clone_from_gitea(args.repo_dir, args.gitea_url)
     add_remote(args.repo_dir, "_github", args.github_url)
     add_remote(args.repo_dir, "_gitea", args.gitea_url)
     try:
@@ -375,6 +398,7 @@ def list_commits(args: argparse.Namespace) -> None:
 
 
 def sync_commit(args: argparse.Namespace) -> None:
+    clone_from_gitea(args.repo_dir, args.gitea_url)
     ensure_clean_worktree(args.repo_dir)
     pr_title, pr_body = validate_pr_text(args.pr_title, args.pr_body, args.gitea_url_re)
     add_remote(args.repo_dir, "_github", args.github_url)

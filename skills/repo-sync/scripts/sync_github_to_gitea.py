@@ -3,7 +3,7 @@
 # requires-python = ">=3.14"
 # dependencies = ["pyyaml>=6.0"]
 # ///
-"""Force-push GitHub main to Gitea main for repo-sync."""
+"""Clone from GitHub (SSH) and force-push to Gitea for repo-sync."""
 
 from __future__ import annotations
 
@@ -20,10 +20,6 @@ from urllib.parse import quote, urlsplit, urlunsplit
 import yaml
 
 CREDENTIAL_URL_RE = re.compile(r"(https?://)[^\s/@]+@")
-REMOTE_LINE_RE = re.compile(
-    r"^(?P<name>\S+)\s+(?P<url>\S+)\s+\((?P<kind>fetch|push)\)$"
-)
-SSH_GITHUB_REMOTE_RE = re.compile(r"^[^@\s]+@github\.com:")
 ROOT_DIR = Path(__file__).resolve().parents[3]
 DEFAULT_GLOBAL_CONFIG = Path.home() / ".agentic" / "agentic.yaml"
 DEFAULT_AGENTIC_DIR = Path.home() / ".agentic"
@@ -94,13 +90,8 @@ def capture(command: list[str]) -> str:
     return result.stdout
 
 
-def git_repo(path: str) -> Path:
-    repo_dir = Path(path).expanduser().resolve()
-    if not repo_dir.is_dir():
-        raise argparse.ArgumentTypeError(f"repo dir does not exist: {repo_dir}")
-    if not (repo_dir / ".git").exists():
-        raise argparse.ArgumentTypeError(f"not a git repo: {repo_dir}")
-    return repo_dir
+def build_github_ssh_url(github_owner: str, repo: str) -> str:
+    return f"git@github.com:{github_owner}/{repo}.git"
 
 
 def load_yaml(path: Path) -> dict[str, object]:
@@ -109,48 +100,6 @@ def load_yaml(path: Path) -> dict[str, object]:
     if not isinstance(data, dict):
         raise SystemExit(f"expected mapping in config file: {path}")
     return data
-
-
-def git_remote_lines(repo_dir: Path) -> list[tuple[str, str, str]]:
-    output = capture(["git", "-C", str(repo_dir), "remote", "-v"])
-    remotes: list[tuple[str, str, str]] = []
-    for line in output.splitlines():
-        match = REMOTE_LINE_RE.match(line.strip())
-        if match:
-            remotes.append(
-                (match.group("name"), match.group("url"), match.group("kind"))
-            )
-    return remotes
-
-
-def is_github_remote(url: str) -> bool:
-    parts = urlsplit(url)
-    if parts.hostname == "github.com":
-        return True
-    return SSH_GITHUB_REMOTE_RE.match(url) is not None
-
-
-def discover_github_url(repo_dir: Path) -> str:
-    fetch_remotes = [
-        (name, url)
-        for name, url, kind in git_remote_lines(repo_dir)
-        if kind == "fetch" and is_github_remote(url)
-    ]
-    if not fetch_remotes:
-        raise SystemExit(
-            "could not find a GitHub fetch remote in the local repository; "
-            "pass --github-url explicitly"
-        )
-    if len(fetch_remotes) == 1:
-        return fetch_remotes[0][1]
-    for name, url in fetch_remotes:
-        if name == "origin":
-            return url
-    names = ", ".join(sorted({name for name, _ in fetch_remotes}))
-    raise SystemExit(
-        "found multiple GitHub fetch remotes without origin "
-        f"({names}); pass --github-url explicitly"
-    )
 
 
 def profile_token(profile_name: str, *, agentic_dir: Path = DEFAULT_AGENTIC_DIR) -> str:
@@ -165,19 +114,19 @@ def profile_token(profile_name: str, *, agentic_dir: Path = DEFAULT_AGENTIC_DIR)
 def build_gitea_url(
     base_url: str,
     token: str,
-    owner: str,
+    gitea_owner: str,
     repo: str,
 ) -> str:
     parts = urlsplit(base_url.rstrip("/"))
     if parts.scheme not in {"http", "https"} or not parts.netloc:
         raise SystemExit(f"invalid gitea base url: {base_url}")
     host = parts.netloc.rsplit("@", 1)[-1]
-    path = f"/{owner}/{repo}.git"
+    path = f"/{gitea_owner}/{repo}.git"
     return urlunsplit((parts.scheme, f"{token}@{host}", path, "", ""))
 
 
 def discover_gitea_url(
-    owner: str,
+    gitea_owner: str,
     repo: str,
     profile_name: str,
     *,
@@ -191,23 +140,23 @@ def discover_gitea_url(
             f"missing gitea.base_url in global config: {global_config_path}"
         )
     token = profile_token(profile_name, agentic_dir=agentic_dir)
-    return build_gitea_url(gitea["base_url"], token, owner, repo)
+    return build_gitea_url(gitea["base_url"], token, gitea_owner, repo)
 
 
-def gitea_api_repo_url(gitea_url: str, owner: str, repo: str) -> str:
+def gitea_api_repo_url(gitea_url: str, gitea_owner: str, repo: str) -> str:
     parts = urlsplit(gitea_url)
     if parts.scheme not in {"http", "https"} or not parts.netloc:
         raise SystemExit(f"invalid Gitea repository URL: {gitea_url}")
     host = parts.hostname or parts.netloc.rsplit("@", 1)[-1]
     if parts.port is not None and ":" not in host:
         host = f"{host}:{parts.port}"
-    expected_repo_path = f"/{owner}/{repo}.git"
+    expected_repo_path = f"/{gitea_owner}/{repo}.git"
     repo_path = parts.path.rstrip("/")
     if not repo_path.endswith(expected_repo_path):
         raise SystemExit(f"invalid Gitea repository URL: {gitea_url}")
     install_prefix = repo_path[: -len(expected_repo_path)]
     path = (
-        f"{install_prefix}/api/v1/repos/{quote(owner)}/{quote(repo)}/pulls"
+        f"{install_prefix}/api/v1/repos/{quote(gitea_owner)}/{quote(repo)}/pulls"
         "?state=open&limit=1"
     )
     return urlunsplit((parts.scheme, host, path, "", ""))
@@ -223,14 +172,14 @@ def gitea_api_token(
 
 
 def assert_no_open_gitea_prs(
-    owner: str,
+    gitea_owner: str,
     repo: str,
     gitea_url: str,
     profile_name: str,
     *,
     agentic_dir: Path = DEFAULT_AGENTIC_DIR,
 ) -> None:
-    api_url = gitea_api_repo_url(gitea_url, owner, repo)
+    api_url = gitea_api_repo_url(gitea_url, gitea_owner, repo)
     token = gitea_api_token(gitea_url, profile_name, agentic_dir=agentic_dir)
     request = urllib.request.Request(
         api_url,
@@ -262,29 +211,28 @@ def assert_no_open_gitea_prs(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Force-push GitHub main to Gitea main.",
+        description="Clone from GitHub (SSH) and force-push to Gitea.",
     )
-    parser.add_argument("--repo-dir", required=True, type=git_repo)
-    parser.add_argument("--owner", required=True)
+    parser.add_argument("--repo-dir", required=True, type=Path)
+    parser.add_argument("--gitea-owner", required=True)
     parser.add_argument("--repo", required=True)
     parser.add_argument("--profile", default="ops_agent")
-    parser.add_argument("--github-url")
+    parser.add_argument("--github-owner", default="tidbcloud")
     parser.add_argument("--gitea-url")
     parser.add_argument("--main-branch", default="main")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    if not args.github_url:
-        args.github_url = discover_github_url(args.repo_dir)
+    args.github_url = build_github_ssh_url(args.github_owner, args.repo)
     if not args.gitea_url:
-        args.gitea_url = discover_gitea_url(args.owner, args.repo, args.profile)
+        args.gitea_url = discover_gitea_url(args.gitea_owner, args.repo, args.profile)
     return args
 
 
 def main() -> None:
     args = parse_args()
-    assert_no_open_gitea_prs(args.owner, args.repo, args.gitea_url, args.profile)
+    assert_no_open_gitea_prs(args.gitea_owner, args.repo, args.gitea_url, args.profile)
     run(
-        ["git", "-C", str(args.repo_dir), "fetch", args.github_url, args.main_branch],
+        ["git", "clone", args.github_url, str(args.repo_dir)],
         dry_run=args.dry_run,
     )
     run(
@@ -295,7 +243,7 @@ def main() -> None:
             "push",
             "--force",
             args.gitea_url,
-            f"FETCH_HEAD:refs/heads/{args.main_branch}",
+            f"HEAD:refs/heads/{args.main_branch}",
         ],
         dry_run=args.dry_run,
     )

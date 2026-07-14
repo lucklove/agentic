@@ -27,24 +27,28 @@ as if the agent should shell into `skills/repo-sync/scripts/...` directly.
 Use `run_skill_script(skill_name="repo-sync", script_name="scripts/sync_github_to_gitea.py", args={...})`
 to force-push GitHub `main` to Gitea `main`.
 
-Before the force-push runs, the script queries the Gitea repository and refuses
-to continue if it already has open pull requests. Resolve or close those pull
-requests first so the mirror update does not invalidate active review work.
+The script clones a fresh copy from GitHub (via SSH) into the specified
+`repo_dir`, then force-pushes to Gitea. Before the force-push runs, the script
+queries the Gitea repository and refuses to continue if it already has open pull
+requests. Resolve or close those pull requests first so the mirror update does
+not invalidate active review work.
 
 Arguments:
 
-- `repo_dir`: local clone path; it must already exist and be a Git repository.
-- `owner`: Gitea repository owner, for example `autonomous`.
+- `repo_dir`: target directory for the fresh clone; it must not already exist as
+  a git repository. The AI agent should choose a unique path to avoid conflicts
+  with other agents.
+- `gitea_owner`: Gitea repository owner, for example `autonomous`.
 - `repo`: repository name, for example `docker-image-controller`.
 - `profile`: profile name used to read the Gitea token from
   `~/.agentic/<name>/profile.yaml`; defaults to `ops_agent`.
-- `github_url`: optional override for the GitHub repository URL. If omitted,
-  the script reads `git remote -v` and uses the GitHub fetch remote, preferring
-  `origin` when multiple GitHub remotes exist.
+- `github_owner`: GitHub organization or user that owns the repository;
+  defaults to `tidbcloud`. Used to build the SSH clone URL
+  `git@github.com:{github_owner}/{repo}.git`.
 - `gitea_url`: optional override for the Gitea repository URL. If omitted, the
   script reads `~/.agentic/agentic.yaml` for `gitea.base_url`, reads the Gitea
   token from the selected profile, and builds the target repository URL from
-  `owner`/`repo`.
+  `gitea_owner`/`repo`.
 - `main_branch`: main branch name; defaults to `main`.
 - `dry_run`: print the commands that would be run without changing anything.
 
@@ -55,20 +59,22 @@ await run_skill_script(
     skill_name="repo-sync",
     script_name="scripts/sync_github_to_gitea.py",
     args={
-        "repo_dir": "/path/to/repo",
-        "owner": "autonomous",
+        "repo_dir": "{working_dir}/sync-gh2gitea-docker-image-controller",
+        "gitea_owner": "autonomous",
         "repo": "docker-image-controller",
     },
 )
 ```
 
-Override URLs explicitly when auto-discovery is ambiguous or when using a
-different profile or remote layout.
+Override URLs explicitly when using a different GitHub owner or profile.
 
 ## Gitea to GitHub
 
-This direction now runs in two explicit steps so the agent controls the GitHub
+This direction runs in two explicit steps so the agent controls the GitHub
 PR title and body.
+
+The script clones a fresh copy from Gitea into the specified `repo_dir`,
+then adds GitHub as a remote using SSH protocol.
 
 ### Step 1: list unsynced commits
 
@@ -79,11 +85,14 @@ on GitHub `main` or in open GitHub pull requests.
 Arguments:
 
 - `command`: set to `list`.
-- `repo_dir`: local clone path; it must already exist and be a Git repository.
+- `repo_dir`: target directory for the fresh clone; it must not already exist
+  as a git repository. The AI agent should choose a unique path.
 - `gitea_url`: Gitea repository URL with token auth.
-- `github_url`: GitHub repository URL with token auth.
+- `github_owner`: GitHub organization or user; defaults to `tidbcloud`.
+  Used to build the GitHub SSH URL `git@github.com:{github_owner}/{repo}.git`.
 - `github_repo`: optional GitHub `owner/repo` name for `gh pr` commands; if
-  omitted, it is derived from `github_url`.
+  omitted, it is derived from `github_owner` and the repo name extracted from
+  `gitea_url`.
 - `main_branch`: main branch name; defaults to `main`.
 
 The script prints a JSON array of objects with `commit`, `commit_title`, and
@@ -97,9 +106,8 @@ await run_skill_script(
     script_name="scripts/sync_gitea_to_github.py",
     args={
         "command": "list",
-        "repo_dir": "/path/to/repo",
+        "repo_dir": "{working_dir}/sync-gitea2gh-agentic",
         "gitea_url": "https://<token>@gitea.example.com/org/repo.git",
-        "github_url": "https://<token>@github.com/owner/repo.git",
     },
 )
 ```
@@ -133,9 +141,8 @@ await run_skill_script(
     script_name="scripts/sync_gitea_to_github.py",
     args={
         "command": "sync",
-        "repo_dir": "/path/to/repo",
+        "repo_dir": "{working_dir}/sync-gitea2gh-agentic",
         "gitea_url": "https://<token>@gitea.example.com/org/repo.git",
-        "github_url": "https://<token>@github.com/owner/repo.git",
         "commit": "abc123def456",
         "pr_title": "Improve repo sync skill invocation",
         "pr_body": "Carry the mirrored change without forge-specific links.",
