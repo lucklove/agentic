@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+import yaml
 
 from capabilities.skills import (
     WikiSkill,
@@ -134,6 +135,58 @@ def test_get_instructions_orders_skills() -> None:
     )
     text = capability.get_instructions()
     assert text.find("name: a") < text.find("name: b")
+
+
+def test_get_instructions_does_not_wrap_long_descriptions() -> None:
+    """Long `description` values must stay on a single YAML line.
+
+    Regression test for #210: ``yaml.safe_dump(..., width=-1)`` was assumed
+    to disable line wrapping, but PyYAML silently falls back to its 80-col
+    default when ``width`` is not a positive number greater than 2 * indent.
+    The fix is to pass ``width=float("inf")``.
+    """
+    long_description = "This is a deliberately long skill description. " * 8
+    assert len(long_description) > 200  # sanity check on the fixture
+
+    capability = WikiSkillCapability(
+        skills=[
+            WikiSkill(
+                name="long-desc-skill",
+                description=long_description,
+                url="http://gitea.ai/a/r/wiki/Long-Desc-Skill",
+                owner="a",
+                repo="r",
+                page_name="Long-Desc-Skill",
+            )
+        ]
+    )
+    text = capability.get_instructions()
+    # The "Available Skills" section is the YAML between the heading and
+    # the trailing blank line that precedes the gitea_wiki_read hint.
+    yaml_section = text.split("## Available Skills\n\n", 1)[1].split(
+        "\n\nIf a task looks like", 1
+    )[0]
+    # Direct check: the description literal must appear on a single line.
+    # PyYAML may wrap the scalar in single quotes (e.g. ``description:
+    # 'long text...'``), so accept either quoted or unquoted form — but
+    # the literal must be present on a single line, not split by a
+    # continuation indent that indicates an 80-col wrap.
+    quoted = f"description: '{long_description}'"
+    unquoted = f"description: {long_description}"
+    assert quoted in yaml_section or unquoted in yaml_section, (
+        "description literal not on a single YAML line; " "yaml.safe_dump is wrapping."
+    )
+    # Round-trip: the rendered YAML must parse back to the original
+    # description. This is a value-level safety net that catches the
+    # silent-wrap case even if a future refactor reintroduces wrapping.
+    parsed = yaml.safe_load(yaml_section)
+    assert parsed == [
+        {
+            "name": "long-desc-skill",
+            "url": "http://gitea.ai/a/r/wiki/Long-Desc-Skill",
+            "description": long_description,
+        }
+    ]
 
 
 # ── make_skills_capability ─────────────────────────────────────────────────

@@ -93,12 +93,16 @@ class WikiSkillCapability(AbstractCapability[Any]):
             {"name": s.name, "url": s.url, "description": s.description}
             for s in self.skills
         ]
+        # PyYAML has no "no wrap" sentinel: `width=-1` and `width=0`
+        # both fall through to the default 80-column wrap. Only `float("inf")`
+        # (or a very large int) disables wrapping, which is what we want so
+        # long skill descriptions stay on a single line in the prompt.
         yaml_str = yaml.safe_dump(
             items,
             sort_keys=False,
             allow_unicode=True,
             default_flow_style=False,
-            width=-1,
+            width=float("inf"),
         ).rstrip()
         hint = (
             "If a task looks like it matches one of the listed skills, call "
