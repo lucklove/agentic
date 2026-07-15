@@ -183,10 +183,21 @@ def test_after_tool_execute_filters_conversation_comments() -> None:
             gitea_username="code_agent",
             gitea_base_url="http://gitea.example",
             gitea_token="token",
+            notification_subject=NotificationSubject(
+                owner="autonomous",
+                repo="agentic",
+                number="31",
+                subject_type="Issue",
+            ),
         )
     )
     tool_def = SimpleNamespace(name="gitea_issue_read")
-    args = {"method": "get_comments"}
+    args = {
+        "method": "get_comments",
+        "owner": "autonomous",
+        "repo": "agentic",
+        "issue_number": 31,
+    }
     result = [
         {"body": "Regular comment", "user": {"login": "human"}},
         {
@@ -262,10 +273,21 @@ def test_after_tool_execute_preserves_different_agent_marker() -> None:
             gitea_username="code_agent",
             gitea_base_url="http://gitea.example",
             gitea_token="token",
+            notification_subject=NotificationSubject(
+                owner="autonomous",
+                repo="agentic",
+                number="31",
+                subject_type="Issue",
+            ),
         )
     )
     tool_def = SimpleNamespace(name="gitea_issue_read")
-    args = {"method": "get_comments"}
+    args = {
+        "method": "get_comments",
+        "owner": "autonomous",
+        "repo": "agentic",
+        "issue_number": 31,
+    }
     result = [
         {
             "id": 1,
@@ -281,6 +303,124 @@ def test_after_tool_execute_preserves_different_agent_marker() -> None:
     )
 
     assert len(filtered) == 1
+
+
+def test_after_tool_execute_skips_filter_when_no_notification_subject() -> None:
+    cap = HarnessCapability()
+    ctx = SimpleNamespace(
+        deps=AgentDeps(
+            backend=object(),
+            gitea_username="code_agent",
+            gitea_base_url="http://gitea.example",
+            gitea_token="token",
+        )
+    )
+    tool_def = SimpleNamespace(name="gitea_issue_read")
+    args = {
+        "method": "get_comments",
+        "owner": "autonomous",
+        "repo": "agentic",
+        "issue_number": 31,
+    }
+    result = [
+        {
+            "id": 2,
+            "body": "<!-- agentic:@code_agent last_seen_comment_id=1 -->\n\nDone.",
+            "user": {"login": "code_agent"},
+        },
+    ]
+
+    output = asyncio.run(
+        cap.after_tool_execute(
+            ctx, call=SimpleNamespace(), tool_def=tool_def, args=args, result=result
+        )
+    )
+
+    assert output is result
+    assert len(output) == 1
+
+
+def test_after_tool_execute_skips_filter_for_different_issue() -> None:
+    cap = HarnessCapability()
+    ctx = SimpleNamespace(
+        deps=AgentDeps(
+            backend=object(),
+            gitea_username="code_agent",
+            gitea_base_url="http://gitea.example",
+            gitea_token="token",
+            notification_subject=NotificationSubject(
+                owner="autonomous",
+                repo="agentic",
+                number="31",
+                subject_type="Issue",
+            ),
+        )
+    )
+    tool_def = SimpleNamespace(name="gitea_issue_read")
+    args = {
+        "method": "get_comments",
+        "owner": "autonomous",
+        "repo": "agentic",
+        "issue_number": 200,
+    }
+    result = [
+        {"body": "Regular comment", "user": {"login": "human"}},
+        {
+            "id": 2,
+            "body": "<!-- agentic:@code_agent last_seen_comment_id=1 -->\n\nDone.",
+            "user": {"login": "code_agent"},
+        },
+    ]
+
+    output = asyncio.run(
+        cap.after_tool_execute(
+            ctx, call=SimpleNamespace(), tool_def=tool_def, args=args, result=result
+        )
+    )
+
+    assert output is result
+    assert len(output) == 2
+
+
+def test_after_tool_execute_skips_filter_for_different_repo() -> None:
+    cap = HarnessCapability()
+    ctx = SimpleNamespace(
+        deps=AgentDeps(
+            backend=object(),
+            gitea_username="code_agent",
+            gitea_base_url="http://gitea.example",
+            gitea_token="token",
+            notification_subject=NotificationSubject(
+                owner="autonomous",
+                repo="agentic",
+                number="31",
+                subject_type="Issue",
+            ),
+        )
+    )
+    tool_def = SimpleNamespace(name="gitea_issue_read")
+    args = {
+        "method": "get_comments",
+        "owner": "autonomous",
+        "repo": "other-repo",
+        "issue_number": 31,
+    }
+    result = [
+        {
+            "id": 2,
+            "body": "<!-- agentic:@code_agent last_seen_comment_id=1 -->\n\nDone.",
+            "user": {"login": "code_agent"},
+        },
+    ]
+
+    output = asyncio.run(
+        cap.after_tool_execute(
+            ctx, call=SimpleNamespace(), tool_def=tool_def, args=args, result=result
+        )
+    )
+
+    assert output is result
+    assert len(output) == 1
 
 
 def test_wrap_tool_execute_marks_run_code_errored_on_model_retry(

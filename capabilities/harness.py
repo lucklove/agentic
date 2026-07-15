@@ -57,7 +57,7 @@ class HarnessCapability(AbstractCapability[AgentDeps]):
             ctx.deps.memory_modified = True
 
         if tool_def.name == "gitea_issue_read" and args.get("method") == "get_comments":
-            return self._filter_comment_read_result(ctx, result)
+            return self._filter_comment_read_result(ctx, result, args)
 
         return result
 
@@ -147,13 +147,31 @@ class HarnessCapability(AbstractCapability[AgentDeps]):
         self,
         ctx: RunContext[AgentDeps],
         result: Any,
+        args: dict[str, Any],
     ) -> Any:
-        """Filter conversation-type comments from Gitea comment reads."""
+        """Filter conversation-type comments from Gitea comment reads.
+
+        Only filters when the read target matches the current
+        ``notification_subject``. Reading comments on a different issue
+        must preserve the agent's own markers, since those are
+        context rather than ongoing dialogue.
+        """
         if not isinstance(result, list):
             return result
 
         agent_name = ctx.deps.gitea_username
         if not agent_name:
+            return result
+
+        subject = ctx.deps.notification_subject
+        if subject is None:
+            return result
+
+        if args.get("owner") != subject.owner:
+            return result
+        if args.get("repo") != subject.repo:
+            return result
+        if str(args.get("issue_number")) != str(subject.number):
             return result
 
         return visible_comments(result, agent_name)
