@@ -4,7 +4,6 @@
 #   "pydantic-ai-slim[openai,anthropic,mcp,logfire,retries]>=1.98.0",
 #   "pydantic-ai-harness[code-mode]>=0.2.0",
 #   "pydantic-ai-backend>=0.2.6",
-#   "pydantic-ai-skills>=0.10.0",
 #   "httpx>=0.28.0",
 #   "pyyaml>=6.0",
 # ]
@@ -246,11 +245,6 @@ async def _build_runtime(
     profile_dir = _profile_dir(profiles_root, profile_name)
     messages_dir = profile_dir / "messages"
 
-    profile_skills_dirs: list[Path] = []
-    skills_subdir = profile_dir / "skills"
-    if skills_subdir.is_dir():
-        profile_skills_dirs.append(skills_subdir)
-
     deps = AgentDeps(
         backend=LocalBackend(working_dir),
         gitea_username=username,
@@ -263,7 +257,6 @@ async def _build_runtime(
         profile,
         global_cfg,
         deps,
-        profile_skills_dirs=profile_skills_dirs,
     )
     return AgentRuntime(
         profile=profile,

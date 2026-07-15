@@ -316,7 +316,7 @@ def test_make_agent_rejects_unknown_profile_capability() -> None:
         make_agent(profile, global_cfg, _deps())
 
 
-def test_registry_merges_skills_from_multiple_directories() -> None:
+def test_registry_builds_skills_capability_from_url_list() -> None:
     global_cfg = GlobalConfig(
         gitea=GiteaGlobalConfig(base_url="http://gitea.example", mcp_command=[]),
     )
@@ -327,111 +327,88 @@ def test_registry_merges_skills_from_multiple_directories() -> None:
         instructions="test",
     )
 
-    def fake_discover_skills(
-        skills_dir: str, script_executor: object = None
-    ) -> list[SimpleNamespace]:
-        if skills_dir == str(Path("/profile-skills").resolve()):
-            return [
-                SimpleNamespace(name="profile-only"),
-                SimpleNamespace(name="shared"),
-            ]
-        if skills_dir == str(Path("/worktree/skills").resolve()):
-            return [SimpleNamespace(name="global-only"), SimpleNamespace(name="shared")]
-        raise AssertionError(skills_dir)
+    captured: dict = {}
 
-    captured: list[SimpleNamespace] = []
+    def fake_make(*, urls: list[str], base_url: str, token: str) -> SimpleNamespace:
+        captured["urls"] = urls
+        captured["base_url"] = base_url
+        captured["token"] = token
+        return SimpleNamespace(skills=[])
 
-    def fake_skills_capability(*, skills: list[SimpleNamespace]) -> SimpleNamespace:
-        captured.extend(skills)
-        return SimpleNamespace(skills=skills)
+    with patch("agent_factory.make_skills_capability", side_effect=fake_make):
+        _build_registry(global_cfg, profile)["skills"](
+            ["http://gitea.example/autonomous/agentic/wiki/Skills/Foo.-"]
+        )
 
-    with patch(
-        "agent_factory._SKILLS_DIR_BASE",
-        Path("/worktree"),
-    ), patch("agent_factory.discover_skills", side_effect=fake_discover_skills), patch(
-        "agent_factory.SkillsCapability",
-        side_effect=fake_skills_capability,
-    ):
-        capability = _build_registry(
-            global_cfg,
-            profile,
-            profile_skills_dirs=(Path("/profile-skills"),),
-        )["skills"]({})
-
-    assert [skill.name for skill in captured] == [
-        "profile-only",
-        "shared",
-        "global-only",
+    assert captured["urls"] == [
+        "http://gitea.example/autonomous/agentic/wiki/Skills/Foo.-"
     ]
-    assert [skill.name for skill in capability.skills] == [
-        "profile-only",
-        "shared",
-        "global-only",
+    assert captured["base_url"] == "http://gitea.example"
+    assert captured["token"] == "token"
+
+
+def test_registry_skills_with_empty_url_list() -> None:
+    global_cfg = GlobalConfig(
+        gitea=GiteaGlobalConfig(base_url="http://gitea.example", mcp_command=[]),
+    )
+    profile = ProfileConfig(
+        model="openai-responses:gpt-5.5",
+        model_settings={},
+        gitea=GiteaProfileConfig(token="token"),
+        instructions="test",
+    )
+
+    captured: dict = {}
+
+    def fake_make(*, urls: list[str], base_url: str, token: str) -> SimpleNamespace:
+        captured["urls"] = urls
+        return SimpleNamespace(skills=[])
+
+    with patch("agent_factory.make_skills_capability", side_effect=fake_make):
+        _build_registry(global_cfg, profile)["skills"]([])
+
+    assert captured["urls"] == []
+
+
+def test_registry_skills_profile_overrides_global() -> None:
+    """Profile skills list entirely replaces global (same as other capabilities)."""
+
+    global_cfg = GlobalConfig(
+        gitea=GiteaGlobalConfig(base_url="http://gitea.example", mcp_command=[]),
+        capabilities={
+            "skills": [
+                "http://gitea.example/owner/repo/wiki/Global.-",
+            ],
+        },
+    )
+    profile = ProfileConfig(
+        model="openai-responses:gpt-5.5",
+        model_settings={},
+        gitea=GiteaProfileConfig(token="token"),
+        instructions="test",
+        capabilities={
+            "skills": [
+                "http://gitea.example/owner/repo/wiki/Profile-A.-",
+                "http://gitea.example/owner/repo/wiki/Profile-B.-",
+            ],
+        },
+    )
+
+    captured: dict = {}
+
+    def fake_make(*, urls: list[str], base_url: str, token: str) -> SimpleNamespace:
+        captured["urls"] = urls
+        return SimpleNamespace(skills=[])
+
+    with patch("agent_factory.make_skills_capability", side_effect=fake_make):
+        # effective_capabilities is built in make_agent, so simulate that merge here.
+        merged = global_cfg.capabilities | profile.capabilities
+        _build_registry(global_cfg, profile)["skills"](merged["skills"])
+
+    assert captured["urls"] == [
+        "http://gitea.example/owner/repo/wiki/Profile-A.-",
+        "http://gitea.example/owner/repo/wiki/Profile-B.-",
     ]
-
-
-def test_registry_uses_global_skills_when_profile_skills_dirs_empty() -> None:
-    global_cfg = GlobalConfig(
-        gitea=GiteaGlobalConfig(base_url="http://gitea.example", mcp_command=[]),
-    )
-    profile = ProfileConfig(
-        model="openai-responses:gpt-5.5",
-        model_settings={},
-        gitea=GiteaProfileConfig(token="token"),
-        instructions="test",
-    )
-
-    captured: list[SimpleNamespace] = []
-
-    def fake_skills_capability(*, skills: list[SimpleNamespace]) -> SimpleNamespace:
-        captured.extend(skills)
-        return SimpleNamespace(skills=skills)
-
-    with patch(
-        "agent_factory._SKILLS_DIR_BASE",
-        Path("/worktree"),
-    ), patch(
-        "agent_factory.discover_skills",
-        return_value=[SimpleNamespace(name="global-only")],
-    ) as discover_skills, patch(
-        "agent_factory.SkillsCapability",
-        side_effect=fake_skills_capability,
-    ):
-        capability = _build_registry(global_cfg, profile)["skills"]({})
-
-    assert [skill.name for skill in captured] == ["global-only"]
-    assert [skill.name for skill in capability.skills] == ["global-only"]
-    assert discover_skills.call_args[0] == (str(Path("/worktree/skills").resolve()),)
-    assert "script_executor" in discover_skills.call_args[1]
-
-
-def test_registry_uses_repo_skills_directory_from_agent_factory_directory() -> None:
-    global_cfg = GlobalConfig(
-        gitea=GiteaGlobalConfig(base_url="http://gitea.example", mcp_command=[]),
-    )
-    profile = ProfileConfig(
-        model="openai-responses:gpt-5.5",
-        model_settings={},
-        gitea=GiteaProfileConfig(token="token"),
-        instructions="test",
-    )
-
-    expected_skills_dir = str(Path("/worktree/skills").resolve())
-
-    with patch(
-        "agent_factory._SKILLS_DIR_BASE",
-        Path("/worktree"),
-    ), patch(
-        "agent_factory.discover_skills",
-        return_value=[SimpleNamespace(name="global-only")],
-    ) as discover_skills, patch(
-        "agent_factory.SkillsCapability",
-        side_effect=lambda *, skills: SimpleNamespace(skills=skills),
-    ):
-        _build_registry(global_cfg, profile)["skills"]({})
-
-    assert discover_skills.call_args[0] == (expected_skills_dir,)
-    assert "script_executor" in discover_skills.call_args[1]
 
 
 def test_registry_builds_mcp_capability() -> None:

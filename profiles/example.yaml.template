@@ -42,11 +42,16 @@ capabilities:
     #   - gitea_actions_config_write
   console:
     include_execute: true
-  skills:
-    # allow:
-    #   - agentic-skill-authoring
-    # deny:
-    #   - noisy-skill
+  # Wiki-backed skills: a list of Gitea wiki page URLs. Each page must
+  # start with a YAML frontmatter that contains at least `name` and
+  # `description`. The capability fetches and validates every URL at
+  # agent start; a broken page fails the start, not the run.
+  #
+  # Gitea appends a `.-` suffix to page names that contain a `/`
+  # (because of how the wiki stores sub-pages on disk), so the URL
+  # must include that suffix verbatim.
+  # skills:
+  #   - http://gitea.ai/autonomous/agentic/wiki/Skills/Issue-Triage.-
   # memory:
   #   backend: file        # "memory" (default, ephemeral) or "file" (on-disk JSON)
   #   # When backend: file, the path defaults to ~/.agentic/<profile>/memory.json.

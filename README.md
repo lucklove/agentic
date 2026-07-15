@@ -24,7 +24,7 @@ There is no `pyproject.toml`; runtime dependencies and Python `>=3.14` live in t
 
 ## Configuration
 
-`~/.agentic/agentic.yaml` is the default global Gitea/MCP config. Shared skills are always loaded from the repository's `./skills` directory, and each profile may add `~/.agentic/<profile>/skills` for local overrides. Per-agent config lives at `~/.agentic/<profile>/profile.yaml` by default. You can override these locations with `--config /path/to/agentic.yaml` and `--profiles-root /path/to/profiles`, where the profiles root is the directory containing named profile subdirectories. Keep shared examples in `profiles/example.yaml.template`.
+`~/.agentic/agentic.yaml` is the default global Gitea/MCP config. Per-agent config lives at `~/.agentic/<profile>/profile.yaml` by default. You can override these locations with `--config /path/to/agentic.yaml` and `--profiles-root /path/to/profiles`, where the profiles root is the directory containing named profile subdirectories. Keep shared examples in `profiles/example.yaml.template`.
 
 `working_dir` controls the `LocalBackend` cwd used by command/code execution. It defaults to `.` in `~/.agentic/agentic.yaml` (the `main.py` directory), and can be overridden per profile with `working_dir` in `~/.agentic/<profile>/profile.yaml`. Relative paths are resolved from the `main.py` directory.
 
@@ -58,9 +58,44 @@ After every `agent.run()`, the output is automatically posted as a comment with 
 
 Configurable capability keys are `code_exec`, `gitea`, `console`, `skills`, `memory`, `harness`, `privacy`, `openai_compaction`, and `anthropic_compaction`. Unknown capability keys now raise a `ValueError` during agent construction so configuration typos fail fast instead of silently disabling capabilities.
 
-`allow` and `deny` filtering is shared by Gitea MCP tools and skills through `capabilities/base.py`: allow wins first, then deny subtracts from it; deny-only exposes everything except denied names.
+`allow` and `deny` filtering is shared by Gitea MCP tools through `capabilities/base.py`: allow wins first, then deny subtracts from it; deny-only exposes everything except denied names. Skills are configured as a list of Gitea wiki page URLs (see [Skills](#skills) below), so they have no `allow`/`deny` knob — the list itself is the enablement set.
 
 `console.include_execute` defaults to `false`. Memory file stores should use paths under `memories/`, which is gitignored.
+
+## Skills
+
+Skills are reusable workflows the agent can opt into. The list is declared as a YAML list of Gitea wiki page URLs in `capabilities.skills`, and the capability validates every URL at agent start (bad URL / missing page / missing frontmatter all fail loudly).
+
+```yaml
+capabilities:
+  skills:
+    - http://gitea.ai/autonomous/agentic/wiki/Skills/Issue-Triage.-
+    - http://gitea.ai/autonomous/agentic/wiki/Skills/Writing-Plans.-
+```
+
+Each wiki page must start with a YAML frontmatter block that defines `name` and `description`:
+
+```markdown
+---
+name: issue-triage
+description: |
+  Triage Gitea issues with an agentic-native workflow that classifies the
+  request, extracts known context, identifies missing information, and turns
+  the thread into clear next actions instead of premature conclusions.
+---
+
+# Issue Triage
+
+...skill body...
+```
+
+Sub-pages work too — split a long skill into `References/...` sub-pages under the same URL prefix. Gitea appends a `.-` suffix to page names that contain `/`, so the URL you put in `capabilities.skills` must include that suffix verbatim (copy it from the wiki page's address bar).
+
+At startup the capability injects a small YAML index of `{name, url, description}` for each skill into the agent prompt, plus a one-line hint pointing the agent at the Gitea MCP `gitea_wiki_read` tool. The agent reads the full skill body on demand by parsing `owner` / `repo` / `pageName` out of the URL and calling `gitea_wiki_read(owner, repo, pageName)`. No new tool is needed — `gitea_wiki_read` is already exposed by the Gitea MCP capability.
+
+Profile `capabilities.skills` replaces the global value entirely (the same replace-not-merge rule that applies to all other capabilities). An empty / unset list means no skills and no prompt injection.
+
+To author a new skill or migrate an existing one, see the `agentic-skill-authoring` wiki page in the `autonomous/agentic` repo.
 
 ## Notes
 
