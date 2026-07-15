@@ -7,12 +7,8 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-GITHUB_TO_GITEA_PATH = (
-    ROOT / "skills" / "repo-sync" / "scripts" / "sync_github_to_gitea.py"
-)
-GITEA_TO_GITHUB_PATH = (
-    ROOT / "skills" / "repo-sync" / "scripts" / "sync_gitea_to_github.py"
-)
+GITHUB_TO_GITEA_PATH = ROOT / "scripts" / "repo-sync" / "sync_github_to_gitea.py"
+GITEA_TO_GITHUB_PATH = ROOT / "scripts" / "repo-sync" / "sync_gitea_to_github.py"
 
 
 def load_module(module_name: str, path: Path):

@@ -69,8 +69,8 @@ Skills are reusable workflows the agent can opt into. The list is declared as a 
 ```yaml
 capabilities:
   skills:
-    - http://gitea.ai/autonomous/agentic/wiki/Skills/Issue-Triage.-
-    - http://gitea.ai/autonomous/agentic/wiki/Skills/Writing-Plans.-
+    - http://gitea.ai/autonomous/agentic/wiki/Issue-Triage
+    - http://gitea.ai/autonomous/agentic/wiki/Writing-Plans
 ```
 
 Each wiki page must start with a YAML frontmatter block that defines `name` and `description`:
@@ -89,13 +89,13 @@ description: |
 ...skill body...
 ```
 
-Sub-pages work too — split a long skill into `References/...` sub-pages under the same URL prefix. Gitea appends a `.-` suffix to page names that contain `/`, so the URL you put in `capabilities.skills` must include that suffix verbatim (copy it from the wiki page's address bar).
+Long skills can be split into separate flat pages under the wiki root (for example, a main page and a `...-Template` reference page). All skill pages sit flat at the wiki root, with no `Skills/` prefix and no `/` in the page name; the page name is the human-readable title with each space replaced by `-`. Link them from the main page with relative wiki links such as `[Template](Writing-Plans-Template)`. The agent reads the linked page on demand via `gitea_wiki_read`.
 
 At startup the capability injects a small YAML index of `{name, url, description}` for each skill into the agent prompt, plus a one-line hint pointing the agent at the Gitea MCP `gitea_wiki_read` tool. The agent reads the full skill body on demand by parsing `owner` / `repo` / `pageName` out of the URL and calling `gitea_wiki_read(owner, repo, pageName)`. No new tool is needed — `gitea_wiki_read` is already exposed by the Gitea MCP capability.
 
 Profile `capabilities.skills` replaces the global value entirely (the same replace-not-merge rule that applies to all other capabilities). An empty / unset list means no skills and no prompt injection.
 
-To author a new skill or migrate an existing one, see the `agentic-skill-authoring` wiki page in the `autonomous/agentic` repo.
+To author a new skill or migrate an existing one, see the [Agentic Skill Authoring](http://gitea.ai/autonomous/agentic/wiki/Agentic-Skill-Authoring) wiki page in the `autonomous/agentic` repo.
 
 ## Notes
 
