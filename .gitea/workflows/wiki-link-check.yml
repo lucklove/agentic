@@ -1,0 +1,90 @@
+name: Wiki link check
+
+# Crawls a Gitea wiki starting from any wiki page and reports broken
+# internal/external links. Used to catch wiki pages that reference pages
+# that have been renamed or deleted (the rel="nofollow" auto-tagging by
+# Gitea hides these from off-the-shelf tools like lychee; this script
+# uses Scrapy, which follows nofollow links).
+#
+# Manual trigger is the primary path -- paste any wiki URL. Weekly cron
+# gives a safety net so rot gets caught even if nobody runs it by hand.
+# Broken links are printed straight to stderr by the script, with
+# ::group:: markers that Gitea Actions renders as collapsible sections
+# in the run log -- no artifact upload, no inline YAML-side parsing.
+
+"on":
+  workflow_dispatch:
+    inputs:
+      start_url:
+        description: "Wiki page URL to start crawling from (any wiki page works)"
+        type: string
+        required: true
+        default: "http://gitea.ai/autonomous/agentic/wiki"
+      max_depth:
+        description: "Maximum link-follow depth for the wiki crawl"
+        type: string
+        required: true
+        default: "6"
+      check_external:
+        description: "HEAD-check non-wiki links (code-browser URLs, external sites)"
+        type: boolean
+        required: true
+        default: true
+  schedule:
+    # Monday 02:00 UTC -- low traffic window on gitea.ai.
+    - cron: "0 2 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: macos-arm64
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Run wiki link checker
+        env:
+          START_URL: ${{ inputs.start_url }}
+          MAX_DEPTH: ${{ inputs.max_depth }}
+          CHECK_EXTERNAL: ${{ inputs.check_external }}
+        run: |
+          set -euo pipefail
+
+          # Build the --no-external flag conditionally without quoting headaches.
+          NO_EXTERNAL_FLAG=""
+          if [ "${CHECK_EXTERNAL}" != "true" ]; then
+            NO_EXTERNAL_FLAG="--no-external"
+          fi
+
+          # Disable color so the ::group:: markers parse cleanly.
+          export PY_COLORS=0
+          export NO_COLOR=1
+
+          # Exit codes:
+          #   0 = clean, 2 = broken links found, 3 = setup error.
+          # The script prints the broken-link summary (with ::group::
+          # sections) to stderr, which Gitea Actions captures directly in
+          # the run log -- no artifact upload, no inline YAML-side parsing.
+          set +e
+          uv run --no-progress .gitea/scripts/check_wiki_links.py \
+            "${START_URL}" \
+            --max-depth "${MAX_DEPTH}" \
+            ${NO_EXTERNAL_FLAG}
+          rc=$?
+          set -e
+
+          # Exit 2 -> fail the job so broken links show up as a red run.
+          if [ "${rc}" -eq 2 ]; then
+            exit 2
+          fi
+          if [ "${rc}" -ne 0 ]; then
+            echo "wiki link checker failed with exit ${rc}" >&2
+            exit "${rc}"
+          fi
