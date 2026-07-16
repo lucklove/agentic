@@ -107,6 +107,30 @@ def split_owner_repo(start_url: str) -> tuple[str, str, str]:
     return api_base, parts[0], parts[1]
 
 
+def split_owner_repo_from_url(url: str) -> tuple[str, str, str] | None:
+    """Pull (api_base, owner, repo) out of any /wiki/ URL.
+
+    Returns None for URLs that don't look like a wiki page (no ``/wiki/``
+    marker, or no ``/owner/repo`` prefix before the marker). This lets
+    callers distinguish "definitely a wiki link in some repo" from
+    "link shape is unrecognised -- can't verify, just HEAD-check it".
+    """
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception:
+        return None
+    marker = "/wiki/"
+    idx = parsed.path.find(marker)
+    if idx < 0:
+        return None
+    prefix = parsed.path[:idx]
+    parts = prefix.strip("/").split("/")
+    if len(parts) < 2:
+        return None
+    api_base = f"{parsed.scheme}://{parsed.netloc}"
+    return api_base, parts[0], parts[1]
+
+
 # ---------------------------------------------------------------------------
 # Wiki API
 # ---------------------------------------------------------------------------
@@ -128,6 +152,43 @@ def fetch_known_wiki_pages(api_base: str, owner: str, repo: str) -> set[str]:
     except urllib.error.URLError as e:
         raise RuntimeError(f"could not reach wiki API at {url}: {e}") from e
     return {normalize_slug(p["title"]) for p in data}
+
+
+class WikiIndexCache:
+    """Lazy, per-repo cache of known wiki page slugs.
+
+    Wikis on the same host often cross-link across repos (e.g. the
+    ``ng-onboarding`` wiki points at skill pages in ``nutshell-skills``).
+    We can't pre-fetch every repo we might encounter, so this cache
+    fetches each repo's wiki index on first request and remembers the
+    result for the rest of the run.
+    """
+
+    def __init__(self) -> None:
+        self._cache: dict[tuple[str, str, str], set[str]] = {}
+
+    def get(self, api_base: str, owner: str, repo: str) -> set[str]:
+        """Return known page slugs for (api_base, owner, repo), fetching once.
+
+        Propagates the underlying exception on the first call so the
+        caller can decide whether a fetch failure is fatal (start repo)
+        or recoverable (a cross-repo link whose index can't be reached).
+        """
+        key = (api_base, owner, repo)
+        if key not in self._cache:
+            self._cache[key] = fetch_known_wiki_pages(api_base, owner, repo)
+        return self._cache[key]
+
+    def repos(self) -> list[tuple[str, str, str, int]]:
+        """List every repo whose index has been fetched, with page count.
+
+        Returned in insertion order so the report stays stable across
+        runs that hit the same repos.
+        """
+        return [
+            (api_base, owner, repo, len(pages))
+            for (api_base, owner, repo), pages in self._cache.items()
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +229,11 @@ class CrawlStats:
     broken_http: list[dict] = field(default_factory=list)
     broken_wiki_pages: list[dict] = field(default_factory=list)
     external_links_referenced: list[str] = field(default_factory=list)
+    # Repos whose wiki index was fetched during the run. Each entry is
+    # ``{"api_base": ..., "owner": ..., "repo": ..., "known_pages": N}``.
+    # Useful for spotting when a crawl touches multiple repos (cross-repo
+    # wiki links) so the report doesn't look confusingly sparse.
+    repos_scanned: list[dict] = field(default_factory=list)
     started_at: float = field(default_factory=time.time)
     finished_at: float | None = None
     broken_http_count: int = 0
@@ -180,6 +246,7 @@ class CrawlStats:
         self.broken_wiki_pages.sort(key=lambda x: x["page"])
         self.external_links_referenced.sort()
         self.known_pages.sort()
+        self.repos_scanned.sort(key=lambda x: (x["owner"], x["repo"]))
         self.broken_http_count = len(self.broken_http)
         self.broken_wiki_count = len(self.broken_wiki_pages)
 
@@ -206,12 +273,14 @@ class CrawlStats:
             "broken_http": self.broken_http,
             "broken_wiki_pages": self.broken_wiki_pages,
             "external_links_referenced": self.external_links_referenced,
+            "repos_scanned": self.repos_scanned,
             "counts": {
                 "known_pages": len(self.known_pages),
                 "ok_pages": len(self.visited_ok),
                 "broken_http": self.broken_http_count,
                 "broken_wiki_pages": self.broken_wiki_count,
                 "external_links_referenced": len(self.external_links_referenced),
+                "repos_scanned": len(self.repos_scanned),
             },
         }
 
@@ -225,6 +294,12 @@ class CrawlStats:
         lines.append(
             f"- **external links referenced**: {len(self.external_links_referenced)}"
         )
+        if self.repos_scanned:
+            repos = ", ".join(
+                f"{r['owner']}/{r['repo']} ({r['known_pages']})"
+                for r in self.repos_scanned
+            )
+            lines.append(f"- **repos scanned**: {repos}")
         if self.finished_at is not None:
             lines.append(
                 f"- **duration**: {round(self.finished_at - self.started_at, 2)}s"
@@ -274,7 +349,8 @@ class CrawlStats:
         print(
             f"pages visited OK: {len(self.visited_ok)} | "
             f"external links referenced: {len(self.external_links_referenced)} | "
-            f"known wiki pages: {len(self.known_pages)}",
+            f"known wiki pages: {len(self.known_pages)} | "
+            f"repos scanned: {len(self.repos_scanned)}",
             file=stream,
         )
         if self.finished_at is not None:
@@ -350,7 +426,7 @@ class WikiLinkCheckSpider(CrawlSpider):
     def __init__(
         self,
         start_url: str,
-        known_pages: set[str],
+        index_cache: WikiIndexCache,
         stats: CrawlStats,
         do_external_checks: bool,
         *args,
@@ -358,7 +434,7 @@ class WikiLinkCheckSpider(CrawlSpider):
     ):
         super().__init__(*args, **kwargs)
         self.start_urls = [start_url]
-        self.known_pages = known_pages
+        self.index_cache = index_cache
         self.stats = stats
         # Note: the attribute is `do_external_checks`, NOT `check_external`,
         # because `check_external` is also a method on this class.
@@ -410,14 +486,39 @@ class WikiLinkCheckSpider(CrawlSpider):
             parsed = urllib.parse.urlparse(target)
             slug = wiki_page_name_from_url(target)
 
-            # 1) Internal wiki page link that doesn't exist in the API index?
-            if (
-                slug is not None
-                and parsed.netloc == self.start_host
-                and slug not in self.known_pages
-            ):
-                self._broken_wiki[slug].add(url)
-                continue
+            # 1) Same-host wiki page link -- verify against the *target*
+            #    repo's wiki index, not the start repo's. Wikis routinely
+            #    cross-link across repos on the same host (e.g. an
+            #    onboarding page linking to skill pages in a separate
+            #    skill repo); checking only the start repo produces
+            #    false-positive "missing" reports for every cross-repo
+            #    page that exists in its own repo.
+            if slug is not None and parsed.netloc == self.start_host:
+                triple = split_owner_repo_from_url(target)
+                if triple is not None:
+                    api_base, owner, repo = triple
+                    try:
+                        known_for_target = self.index_cache.get(api_base, owner, repo)
+                    except Exception as e:
+                        # Surface the fetch failure but don't crash the
+                        # crawl -- mark the slug as broken so it shows
+                        # up in the report alongside HTTP errors.
+                        LOG.warning(
+                            "wiki index fetch failed for %s/%s/%s: %s",
+                            api_base,
+                            owner,
+                            repo,
+                            e,
+                        )
+                        self._broken_wiki[slug].add(url)
+                        continue
+                    if slug not in known_for_target:
+                        self._broken_wiki[slug].add(url)
+                        continue
+                    # Found in target repo's index -- fall through.
+                # else: /wiki/ URL with no owner/repo prefix. Treat as
+                # "shape unrecognised" and fall through to branch 3 so
+                # the HEAD check decides whether it exists.
 
             # 2) Skip anchors / mailto / javascript: -- not worth HEAD-checking.
             scheme = (parsed.scheme or "").lower()
@@ -478,6 +579,15 @@ class WikiLinkCheckSpider(CrawlSpider):
             for slug, srcs in self._broken_wiki.items()
         ]
         self.stats.external_links_referenced = sorted(self._ext_referenced.keys())
+        self.stats.repos_scanned = [
+            {
+                "api_base": api_base,
+                "owner": owner,
+                "repo": repo,
+                "known_pages": n,
+            }
+            for (api_base, owner, repo, n) in self.index_cache.repos()
+        ]
         self.stats.finalize()
 
 
@@ -556,8 +666,12 @@ def main(argv: list[str]) -> int:
         LOG.error("%s", e)
         return 3
 
+    # Pre-fetch the start repo so a totally unreachable wiki fails fast
+    # with a clear error, rather than 5 minutes into the crawl. Cross-repo
+    # wiki indices are fetched lazily by the spider on first encounter.
+    index_cache = WikiIndexCache()
     try:
-        known = fetch_known_wiki_pages(api_base, owner, repo)
+        known = index_cache.get(api_base, owner, repo)
     except Exception as e:
         LOG.error("wiki index fetch failed: %s", e)
         return 3
@@ -585,7 +699,7 @@ def main(argv: list[str]) -> int:
     process.crawl(
         WikiLinkCheckSpider,
         start_url=args.start_url,
-        known_pages=known,
+        index_cache=index_cache,
         stats=stats,
         do_external_checks=not args.no_external,
     )
