@@ -486,6 +486,48 @@ def test_handle_notification_skips_when_only_other_agent_marker_after_seen(
     asyncio.run(run())
 
 
+def test_handle_notification_skips_when_other_agent_conversation_mentions_me(
+    deps: AgentDeps,
+) -> None:
+    """Regression for issue #225.
+
+    When another agent posts a conversation response (with their own
+    ``<!-- agentic:@<them> -->`` marker) and that response @-mentions us, we
+    must not be treated as freshly mentioned: the @-mention is incidental
+    prose inside their reply, not a deliberate notification.  Otherwise the
+    two agents @-mention each other back and forth in a ping-pong loop.
+    """
+
+    async def run() -> None:
+        http = FakeHTTP(
+            subject={
+                "state": "open",
+                "closed_at": None,
+                "user": {"login": "human"},
+                "assignees": [{"login": "code_agent"}],
+            },
+            comments=[
+                {
+                    "id": 1,
+                    "body": (
+                        "<!-- agentic:@review_agent"
+                        " last_seen_comment_id=0 -->\n\n"
+                        "Done, but looping in @code_agent"
+                    ),
+                    "user": {"login": "review_agent"},
+                },
+            ],
+        )
+        agent = PassingAgent()
+
+        await _handle_notification(agent, http, notification(), deps)
+
+        assert http.patches == ["/api/v1/notifications/threads/123"]
+        assert agent.run_deps is None
+
+    asyncio.run(run())
+
+
 def test_handle_notification_marks_pull_thread_read_when_last_comment_mentions_agent(
     deps: AgentDeps,
 ) -> None:

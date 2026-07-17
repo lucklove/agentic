@@ -49,6 +49,14 @@ _DEPENDENCIES_PATH_TEMPLATE = Template(
     "/api/v1/repos/$owner/$repo/issues/$number/dependencies"
 )
 _MENTION_PATTERN = re.compile(r"(?:^|[^\w`])@([A-Za-z0-9._-]+)(?=\W|$)")
+# Conversation markers identify the *author* of a comment (set in
+# ``_post_agent_response``), not the target.  When another agent @-mentions
+# us inside its own conversation response, we must not treat that as a fresh
+# mention notification, or agents start @-mentioning each other back and
+# forth in a ping-pong loop (issue #225).
+_ANY_AGENT_MARKER_PATTERN = re.compile(
+    r"<!--\s*agentic:@[A-Za-z0-9._-]+\s+last_seen_comment_id=\d+\s*-->"
+)
 
 
 def _agent_run_usage_limits(request_limit: int) -> UsageLimits:
@@ -169,7 +177,7 @@ def _mentioned_comments_after(
     return [
         comment
         for comment in _comments_after(comments, last_seen_comment_id)
-        if not is_conversation_comment(comment.get("body", ""), agent_name)
+        if not _ANY_AGENT_MARKER_PATTERN.search(comment.get("body", "") or "")
         and _mentions_agent(comment, agent_name)
     ]
 
