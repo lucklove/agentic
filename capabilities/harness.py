@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic_ai import ModelRetry
+from pydantic_ai import ModelRetry, UsageLimitExceeded, UserError
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.tools import RunContext, Tool
@@ -70,16 +70,30 @@ class HarnessCapability(AbstractCapability[AgentDeps]):
         args: dict[str, Any],
         handler: Any,
     ) -> Any:
-        # run_code reports runtime errors by raising ModelRetry, which bypasses
-        # on_tool_execute_error. Wrap the execution so any failure (ModelRetry
-        # included) is recorded before being re-raised.
+        # Only ``run_code`` is converted into ``ModelRetry`` because it is the
+        # one tool where a non-ModelRetry exception is genuinely recoverable by
+        # editing and re-running the code (NameError, TypeError, JSON dump of a
+        # non-serializable value, etc.). Every other tool — gitea_*, mcp_*,
+        # execute, sleep, ... — is left untouched so real failures (auth
+        # errors, 4xx/5xx that retrying cannot fix) surface immediately instead
+        # of burning through code_exec.max_retries with no chance of recovery.
         if tool_def.name != "run_code":
             return await handler(args)
         try:
             return await handler(args)
-        except Exception:
+        except (UserError, UsageLimitExceeded):
+            # UserError / UsageLimitExceeded carry their own semantics in
+            # pydantic-ai; leave them untouched and do not flip
+            # run_code_errored (the agent loop will handle them).
+            raise
+        except ModelRetry:
             ctx.deps.run_code_errored = True
             raise
+        except Exception as exc:
+            # Wrap any other Exception as ModelRetry so the pydantic-ai retry
+            # loop can recover. ``__cause__`` preserves the original traceback.
+            ctx.deps.run_code_errored = True
+            raise ModelRetry(str(exc)) from exc
 
     async def before_output_process(
         self,
