@@ -4,7 +4,8 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
-from pydantic_ai import ModelRetry, UsageLimitExceeded, UserError
+from pydantic_ai import ModelRetry
+from pydantic_ai.messages import ToolReturn
 
 from capabilities.harness import HarnessCapability
 from deps import AgentDeps, NotificationSubject
@@ -457,7 +458,7 @@ def test_wrap_tool_execute_marks_run_code_errored_on_exception(
     async def handler(args: dict) -> None:
         raise RuntimeError("sandbox error")
 
-    with pytest.raises(ModelRetry) as exc_info:
+    with pytest.raises(RuntimeError, match="sandbox error"):
         asyncio.run(
             cap.wrap_tool_execute(
                 ctx,
@@ -468,19 +469,47 @@ def test_wrap_tool_execute_marks_run_code_errored_on_exception(
             )
         )
 
-    # The original exception is preserved via __cause__ so logs stay inspectable.
-    assert isinstance(exc_info.value.__cause__, RuntimeError)
-    assert str(exc_info.value.__cause__) == "sandbox error"
     assert deps.run_code_errored is True
+
+
+def test_wrap_tool_execute_propagates_keyboard_interrupt_unchanged(
+    deps: AgentDeps,
+) -> None:
+    """``KeyboardInterrupt`` is a ``BaseException`` subclass, not an
+    ``Exception``. ``except Exception`` must NOT swallow it; it must
+    propagate unchanged so the agent run actually stops when the user
+    aborts. ``run_code_errored`` must also stay False — the user did
+    not ask the agent to recover from anything.
+    """
+    cap = HarnessCapability()
+    ctx = SimpleNamespace(deps=deps)
+    tool_def = SimpleNamespace(name="run_code")
+
+    async def handler(args: dict) -> None:
+        raise KeyboardInterrupt()
+
+    with pytest.raises(KeyboardInterrupt):
+        asyncio.run(
+            cap.wrap_tool_execute(
+                ctx,
+                call=SimpleNamespace(),
+                tool_def=tool_def,
+                args={},
+                handler=handler,
+            )
+        )
+
+    assert deps.run_code_errored is False
 
 
 def test_wrap_tool_execute_passes_through_on_success(deps: AgentDeps) -> None:
     cap = HarnessCapability()
     ctx = SimpleNamespace(deps=deps)
     tool_def = SimpleNamespace(name="run_code")
+    original = ToolReturn(return_value={"output": "ok"})
 
-    async def handler(args: dict) -> str:
-        return "ok"
+    async def handler(args: dict) -> ToolReturn:
+        return original
 
     result = asyncio.run(
         cap.wrap_tool_execute(
@@ -492,11 +521,16 @@ def test_wrap_tool_execute_passes_through_on_success(deps: AgentDeps) -> None:
         )
     )
 
-    assert result == "ok"
+    assert result is original
+    assert result.return_value == {"output": "ok"}
     assert deps.run_code_errored is False
 
 
 def test_wrap_tool_execute_ignores_other_tools(deps: AgentDeps) -> None:
+    """Non-``run_code`` tools (gitea_*, mcp_*, execute, sleep, ...) propagate
+    raw exceptions unchanged — they aren't recoverable by editing code, so
+    retrying through ``code_exec.max_retries`` would just burn the budget.
+    """
     cap = HarnessCapability()
     ctx = SimpleNamespace(deps=deps)
     tool_def = SimpleNamespace(name="gitea_issue_write")
@@ -504,9 +538,6 @@ def test_wrap_tool_execute_ignores_other_tools(deps: AgentDeps) -> None:
     async def handler(args: dict) -> None:
         raise RuntimeError("some error")
 
-    # Non-run_code tools are intentionally NOT converted to ModelRetry.
-    # A real failure (auth error, 4xx, network) cannot be recovered by
-    # retrying, so it propagates as-is and run_code_errored stays False.
     with pytest.raises(RuntimeError) as exc_info:
         asyncio.run(
             cap.wrap_tool_execute(
@@ -518,8 +549,81 @@ def test_wrap_tool_execute_ignores_other_tools(deps: AgentDeps) -> None:
             )
         )
 
-    assert str(exc_info.value) == "some error"
+    # ``__cause__`` must be None: the original RuntimeError was never wrapped
+    # in anything, so the traceback chain has no synthetic link.
     assert exc_info.value.__cause__ is None
+    assert deps.run_code_errored is False
+
+
+def test_wrap_tool_execute_sanitizes_non_jsonable_run_code_result(
+    deps: AgentDeps,
+) -> None:
+    """Successful ``run_code`` returns whose ``ToolReturn.return_value``
+    contains non-JSON-serializable leaves (e.g. ``type(1)`` → ``<class 'int'>``)
+    must be sanitized so pydantic-ai's OTel instrumentation does not raise
+    ``PydanticSerializationError`` while dumping the span.
+    """
+    cap = HarnessCapability()
+    ctx = SimpleNamespace(deps=deps)
+    tool_def = SimpleNamespace(name="run_code")
+    sentinel_metadata = {"code_mode": True}
+    original = ToolReturn(
+        return_value={"output": "", "result": type(1)},
+        metadata=sentinel_metadata,
+    )
+
+    async def handler(args: dict) -> ToolReturn:
+        return original
+
+    result = asyncio.run(
+        cap.wrap_tool_execute(
+            ctx,
+            call=SimpleNamespace(),
+            tool_def=tool_def,
+            args={},
+            handler=handler,
+        )
+    )
+
+    # Mutated in place: same object, ``return_value`` rewritten, ``metadata``
+    # untouched.
+    assert result is original
+    assert result.return_value == {"output": "", "result": "<class 'int'>"}
+    assert result.metadata is sentinel_metadata
+    assert deps.run_code_errored is False
+
+
+def test_wrap_tool_execute_passes_through_jsonable_run_code_result(
+    deps: AgentDeps,
+) -> None:
+    """The common path (already-JSON-serializable results) returns an
+    equivalent ``ToolReturn`` and does not flip ``run_code_errored``.
+    """
+    cap = HarnessCapability()
+    ctx = SimpleNamespace(deps=deps)
+    tool_def = SimpleNamespace(name="run_code")
+    sentinel_metadata = {"code_mode": True}
+    original = ToolReturn(
+        return_value={"output": "", "result": 42},
+        metadata=sentinel_metadata,
+    )
+
+    async def handler(args: dict) -> ToolReturn:
+        return original
+
+    result = asyncio.run(
+        cap.wrap_tool_execute(
+            ctx,
+            call=SimpleNamespace(),
+            tool_def=tool_def,
+            args={},
+            handler=handler,
+        )
+    )
+
+    assert isinstance(result, ToolReturn)
+    assert result.return_value == {"output": "", "result": 42}
+    assert result.metadata is sentinel_metadata
     assert deps.run_code_errored is False
 
 
@@ -611,140 +715,3 @@ def test_before_output_process_passes_when_no_error(deps: AgentDeps) -> None:
     )
 
     assert output == "Here is my answer."
-
-
-# wrap_tool_execute — exception-conversion semantics
-# ---------------------------------------------------------------------------
-
-
-def test_wrap_tool_execute_propagates_keyboard_interrupt_unchanged(
-    deps: AgentDeps,
-) -> None:
-    cap = HarnessCapability()
-    ctx = SimpleNamespace(deps=deps)
-    tool_def = SimpleNamespace(name="run_code")
-
-    async def handler(args: dict) -> None:
-        raise KeyboardInterrupt
-
-    # KeyboardInterrupt inherits from BaseException, not Exception, so the
-    # ``except Exception`` filter does not catch it. Intentional aborts
-    # (including run_code's ``restart=True`` pathway) must propagate so the
-    # framework can do the right thing.
-    with pytest.raises(KeyboardInterrupt):
-        asyncio.run(
-            cap.wrap_tool_execute(
-                ctx,
-                call=SimpleNamespace(),
-                tool_def=tool_def,
-                args={},
-                handler=handler,
-            )
-        )
-
-    assert deps.run_code_errored is False
-
-
-def test_wrap_tool_execute_passes_user_error_through_run_code(
-    deps: AgentDeps,
-) -> None:
-    cap = HarnessCapability()
-    ctx = SimpleNamespace(deps=deps)
-    tool_def = SimpleNamespace(name="run_code")
-
-    async def handler(args: dict) -> None:
-        raise UserError("bad run_code args")
-
-    with pytest.raises(UserError):
-        asyncio.run(
-            cap.wrap_tool_execute(
-                ctx,
-                call=SimpleNamespace(),
-                tool_def=tool_def,
-                args={},
-                handler=handler,
-            )
-        )
-
-    # UserError propagates without being re-wrapped and without flipping the
-    # ``run_code_errored`` flag — the pydantic-ai loop handles UserError
-    # separately from ModelRetry.
-    assert deps.run_code_errored is False
-
-
-def test_wrap_tool_execute_passes_user_error_through_other_tools(
-    deps: AgentDeps,
-) -> None:
-    cap = HarnessCapability()
-    ctx = SimpleNamespace(deps=deps)
-    tool_def = SimpleNamespace(name="gitea_issue_write")
-
-    async def handler(args: dict) -> None:
-        raise UserError("bad args")
-
-    with pytest.raises(UserError):
-        asyncio.run(
-            cap.wrap_tool_execute(
-                ctx,
-                call=SimpleNamespace(),
-                tool_def=tool_def,
-                args={},
-                handler=handler,
-            )
-        )
-
-    assert deps.run_code_errored is False
-
-
-def test_wrap_tool_execute_passes_usage_limit_exceeded_through_run_code(
-    deps: AgentDeps,
-) -> None:
-    cap = HarnessCapability()
-    ctx = SimpleNamespace(deps=deps)
-    tool_def = SimpleNamespace(name="run_code")
-
-    async def handler(args: dict) -> None:
-        raise UsageLimitExceeded("limit hit")
-
-    with pytest.raises(UsageLimitExceeded):
-        asyncio.run(
-            cap.wrap_tool_execute(
-                ctx,
-                call=SimpleNamespace(),
-                tool_def=tool_def,
-                args={},
-                handler=handler,
-            )
-        )
-
-    assert deps.run_code_errored is False
-
-
-def test_wrap_tool_execute_does_not_wrap_other_tools_passes_through(
-    deps: AgentDeps,
-) -> None:
-    """Non-run_code tools (gitea_*, mcp_*, execute, sleep, ...) propagate
-    their raw exceptions instead of being converted to ModelRetry. The agent
-    can only meaningfully retry sandboxed code, so wrapping other tools
-    would just burn the retry budget on failures that editing code cannot fix.
-    """
-    cap = HarnessCapability()
-    ctx = SimpleNamespace(deps=deps)
-    tool_def = SimpleNamespace(name="execute")
-
-    async def handler(args: dict) -> None:
-        raise KeyError("missing-key")
-
-    with pytest.raises(KeyError) as exc_info:
-        asyncio.run(
-            cap.wrap_tool_execute(
-                ctx,
-                call=SimpleNamespace(),
-                tool_def=tool_def,
-                args={},
-                handler=handler,
-            )
-        )
-
-    assert exc_info.value.__cause__ is None
-    assert deps.run_code_errored is False

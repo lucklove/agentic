@@ -7,11 +7,12 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic_ai import ModelRetry, UsageLimitExceeded, UserError
+from pydantic_ai import ModelRetry
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.tools import RunContext, Tool
 from pydantic_ai.toolsets.function import FunctionToolset
+from pydantic_core import to_jsonable_python
 
 from conversation import visible_comments
 from deps import AgentDeps
@@ -70,30 +71,29 @@ class HarnessCapability(AbstractCapability[AgentDeps]):
         args: dict[str, Any],
         handler: Any,
     ) -> Any:
-        # Only ``run_code`` is converted into ``ModelRetry`` because it is the
-        # one tool where a non-ModelRetry exception is genuinely recoverable by
-        # editing and re-running the code (NameError, TypeError, JSON dump of a
-        # non-serializable value, etc.). Every other tool — gitea_*, mcp_*,
-        # execute, sleep, ... — is left untouched so real failures (auth
-        # errors, 4xx/5xx that retrying cannot fix) surface immediately instead
-        # of burning through code_exec.max_retries with no chance of recovery.
+        # ``run_code`` reports runtime errors by raising ``ModelRetry``, which
+        # bypasses ``on_tool_execute_error``. Record the failure before
+        # re-raising so ``before_output_process`` can force a memory update
+        # if the agent tries to produce a final answer without one.
+        #
+        # ``run_code`` also returns a ``ToolReturn`` whose ``return_value``
+        # is sent verbatim to the model and to the OTel span as a span
+        # attribute. If the sandbox code produced a non-JSON-serializable
+        # value (e.g. ``type(1)`` → ``<class 'int'>``), pydantic-ai's
+        # instrumentation raises ``PydanticSerializationError`` while
+        # dumping that span, which crashes the whole agent run with no
+        # ModelRetry. Sanitize unserializable leaves to ``str()`` so the
+        # model still sees a useful message and the agent loop continues.
         if tool_def.name != "run_code":
             return await handler(args)
         try:
-            return await handler(args)
-        except (UserError, UsageLimitExceeded):
-            # UserError / UsageLimitExceeded carry their own semantics in
-            # pydantic-ai; leave them untouched and do not flip
-            # run_code_errored (the agent loop will handle them).
-            raise
-        except ModelRetry:
+            result = await handler(args)
+        except Exception:
             ctx.deps.run_code_errored = True
             raise
-        except Exception as exc:
-            # Wrap any other Exception as ModelRetry so the pydantic-ai retry
-            # loop can recover. ``__cause__`` preserves the original traceback.
-            ctx.deps.run_code_errored = True
-            raise ModelRetry(str(exc)) from exc
+
+        result.return_value = to_jsonable_python(result.return_value, fallback=str)
+        return result
 
     async def before_output_process(
         self,
