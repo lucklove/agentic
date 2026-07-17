@@ -866,6 +866,7 @@ def test_handle_notification_merges_chat_then_mentions_into_one_message(
             "chat 1\n\n"
             "chat 2 @code_agent\n\n"
             "Someone mentioned you in autonomous/agentic issue #31\n\n"
+            "You have the right (but not the obligation) to reply via gitea_issue_write.\n\n"
             "======== comment id: 3, from @agent_a ========\n\n"
             "Please handle this @code_agent\n\n"
             "======== comment id: 4, from @agent_b ========\n\n"

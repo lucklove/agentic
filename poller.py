@@ -143,7 +143,8 @@ def _format_mentioned_comments_message(
     type_label = "issue" if notif_ctx.subject_type == "Issue" else "PR"
     parts = [
         f"Someone mentioned you in {notif_ctx.repo_full_name} "
-        f"{type_label} #{notif_ctx.number}"
+        f"{type_label} #{notif_ctx.number}",
+        "You have the right (but not the obligation) to reply via gitea_issue_write.",
     ]
 
     for comment in comments:
