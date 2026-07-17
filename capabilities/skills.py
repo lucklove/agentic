@@ -42,6 +42,23 @@ the response's ``content_base64`` field.
 The agent reads the full body via the Gitea MCP ``gitea_wiki_read`` tool,
 which is already exposed to the agent through the standard Gitea MCP
 capability — no new tool is added.
+
+Wiki page-name normalisation
+----------------------------
+Wiki pages in Gitea keep their natural ``Title With Spaces`` form in the
+MCP ``pageName`` argument, but agents and skills tend to reach for the
+URL slug form (``Title-With-Spaces``). To make both spellings
+interchangeable, ``WikiSkillCapability.before_tool_execute`` rewrites
+``pageName`` in ``gitea_wiki_read`` / ``gitea_wiki_write`` calls by
+replacing ``-`` with a single space before the call reaches the server.
+All other tools are unaffected.
+
+The ``.-`` suffix that Gitea appends to sub-page slugs (e.g.
+``Skills/Issue-Triage.-``) is preserved verbatim — rewriting it would
+turn the suffix into ``. `` and 404 the request. Skills declared in
+the profile YAML are always loaded in this slug form, so the agent
+most often reaches for this exact shape when fetching a configured
+skill.
 """
 
 from __future__ import annotations
@@ -54,6 +71,8 @@ from urllib.parse import urlparse
 import httpx
 import yaml
 from pydantic_ai.capabilities import AbstractCapability
+from pydantic_ai.messages import ToolCallPart
+from pydantic_ai.tools import RunContext
 
 __all__ = [
     "WikiSkill",
@@ -61,6 +80,12 @@ __all__ = [
     "make_skills_capability",
     "parse_wiki_url",
 ]
+
+# MCP tool names whose ``pageName`` argument should have ``-`` rewritten
+# to spaces before reaching the server. Centralized so the
+# ``before_tool_execute`` filter stays a one-liner and the supported
+# tool set is grep-able / test-assertable.
+_WIKI_PAGE_TOOLS = frozenset({"gitea_wiki_read", "gitea_wiki_write"})
 
 
 @dataclass(frozen=True)
@@ -113,6 +138,53 @@ class WikiSkillCapability(AbstractCapability[Any]):
             "follows."
         )
         return f"## Available Skills\n\n{yaml_str}\n\n{hint}"
+
+    async def before_tool_execute(
+        self,
+        ctx: RunContext[Any],
+        *,
+        call: ToolCallPart,
+        tool_def: Any,
+        args: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Normalize the ``pageName`` argument for wiki MCP calls.
+
+        Gitea wiki pages keep their natural ``Title With Spaces`` form in
+        the MCP ``pageName`` parameter, but skills and prompts most
+        naturally refer to them by their URL slug (``Title-With-Spaces``).
+        To make both spellings interchangeable, this hook rewrites
+        ``pageName`` in ``gitea_wiki_read`` and ``gitea_wiki_write`` calls
+        by replacing ``-`` with a single space before the call reaches
+        the MCP server. All other tools (and calls without a string
+        ``pageName``) pass through untouched.
+
+        Exception: ``pageName`` values ending in ``.-`` are left as-is.
+        The ``.-`` suffix is what Gitea appends to sub-page slugs when
+        the page name contains a slash (e.g. ``Skills/Issue-Triage.-``)
+        and is the verbatim form the wiki API expects — rewriting it
+        would turn the suffix into ``. `` and 404 the request. Skills
+        declared in the profile YAML are always loaded in this slug form
+        (see :func:`parse_wiki_url`), so the agent most often reaches for
+        this exact shape when fetching a configured skill.
+
+        Returns a new ``args`` dict only when a substitution is actually
+        performed; otherwise the caller's dict is returned by identity so
+        hot-path tools add zero overhead.
+        """
+        if tool_def.name not in _WIKI_PAGE_TOOLS:
+            return args
+
+        page_name = args.get("pageName")
+        if (
+            not isinstance(page_name, str)
+            or "-" not in page_name
+            or page_name.endswith(".-")
+        ):
+            return args
+
+        new_args = dict(args)
+        new_args["pageName"] = page_name.replace("-", " ")
+        return new_args
 
 
 def parse_wiki_url(url: str) -> tuple[str, str, str]:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -409,3 +410,257 @@ def test_make_skills_capability_first_failure_aborts() -> None:
                 base_url="http://gitea.example",
                 token="t",
             )
+
+
+# ── before_tool_execute (pageName normalisation) ────────────────────────────
+# Regression tests for #219: WikiSkillCapability must rewrite ``-`` to `` `` in
+# the ``pageName`` argument of ``gitea_wiki_read`` / ``gitea_wiki_write`` so
+# agents can pass either the URL-slug form (``Issue-Triage``) or the natural
+# title form (``Issue Triage``) interchangeably.
+
+
+def test_before_tool_execute_rewrites_dashes_in_wiki_read_page_name() -> None:
+    capability = WikiSkillCapability(skills=[])
+    tool_def = SimpleNamespace(name="gitea_wiki_read")
+    args = {
+        "method": "get",
+        "owner": "autonomous",
+        "repo": "agentic",
+        "pageName": "Issue-Triage",
+    }
+
+    new_args = asyncio.run(
+        capability.before_tool_execute(
+            ctx=SimpleNamespace(),
+            call=SimpleNamespace(),
+            tool_def=tool_def,
+            args=args,
+        )
+    )
+
+    assert new_args["pageName"] == "Issue Triage"
+    # Other keys must survive untouched.
+    assert new_args["method"] == "get"
+    assert new_args["owner"] == "autonomous"
+    assert new_args["repo"] == "agentic"
+    # The original args dict must not be mutated in place; otherwise
+    # downstream handlers / logging would observe an unexpected rewrite.
+    assert args["pageName"] == "Issue-Triage"
+    assert new_args is not args
+
+
+def test_before_tool_execute_rewrites_dashes_in_wiki_write_page_name() -> None:
+    capability = WikiSkillCapability(skills=[])
+    tool_def = SimpleNamespace(name="gitea_wiki_write")
+    args = {
+        "method": "create",
+        "owner": "autonomous",
+        "repo": "agentic",
+        "title": "Issue Triage",
+        "pageName": "Issue-Triage",
+        "content": "body",
+    }
+
+    new_args = asyncio.run(
+        capability.before_tool_execute(
+            ctx=SimpleNamespace(),
+            call=SimpleNamespace(),
+            tool_def=tool_def,
+            args=args,
+        )
+    )
+
+    assert new_args["pageName"] == "Issue Triage"
+    # Other keys (including title, which is the user-facing display name and
+    # should keep its space form) must be preserved verbatim.
+    assert new_args["title"] == "Issue Triage"
+    assert new_args["content"] == "body"
+
+
+def test_before_tool_execute_rewrites_multiple_dashes() -> None:
+    capability = WikiSkillCapability(skills=[])
+    tool_def = SimpleNamespace(name="gitea_wiki_read")
+    args = {"pageName": "Writing-Plans-And-Tracking"}
+
+    new_args = asyncio.run(
+        capability.before_tool_execute(
+            ctx=SimpleNamespace(),
+            call=SimpleNamespace(),
+            tool_def=tool_def,
+            args=args,
+        )
+    )
+
+    assert new_args["pageName"] == "Writing Plans And Tracking"
+
+
+def test_before_tool_execute_passes_through_already_spaced_page_name() -> None:
+    """No rewrite needed when ``pageName`` already uses spaces."""
+    capability = WikiSkillCapability(skills=[])
+    tool_def = SimpleNamespace(name="gitea_wiki_read")
+    args = {
+        "method": "get",
+        "owner": "autonomous",
+        "repo": "agentic",
+        "pageName": "Issue Triage",
+    }
+
+    new_args = asyncio.run(
+        capability.before_tool_execute(
+            ctx=SimpleNamespace(),
+            call=SimpleNamespace(),
+            tool_def=tool_def,
+            args=args,
+        )
+    )
+
+    # Identity return on the hot path so we don't allocate a new dict
+    # when there is nothing to rewrite.
+    assert new_args is args
+    assert new_args["pageName"] == "Issue Triage"
+
+
+def test_before_tool_execute_ignores_other_tools() -> None:
+    """Only wiki MCP tools are subject to the rewrite."""
+    capability = WikiSkillCapability(skills=[])
+    tool_def = SimpleNamespace(name="gitea_issue_write")
+    args = {
+        "method": "create",
+        "owner": "autonomous",
+        "repo": "agentic",
+        "title": "Has-Dashes-In-Title",
+    }
+
+    new_args = asyncio.run(
+        capability.before_tool_execute(
+            ctx=SimpleNamespace(),
+            call=SimpleNamespace(),
+            tool_def=tool_def,
+            args=args,
+        )
+    )
+
+    assert new_args is args
+    assert new_args["title"] == "Has-Dashes-In-Title"
+
+
+def test_before_tool_execute_ignores_wiki_list_method_without_page_name() -> None:
+    """``gitea_wiki_read(method="list")`` has no ``pageName`` — pass through."""
+    capability = WikiSkillCapability(skills=[])
+    tool_def = SimpleNamespace(name="gitea_wiki_read")
+    args = {"method": "list", "owner": "autonomous", "repo": "agentic"}
+
+    new_args = asyncio.run(
+        capability.before_tool_execute(
+            ctx=SimpleNamespace(),
+            call=SimpleNamespace(),
+            tool_def=tool_def,
+            args=args,
+        )
+    )
+
+    assert new_args is args
+
+
+def test_before_tool_execute_handles_missing_page_name() -> None:
+    """If the call has no ``pageName`` key at all, pass through unchanged."""
+    capability = WikiSkillCapability(skills=[])
+    tool_def = SimpleNamespace(name="gitea_wiki_read")
+    args = {"method": "get", "owner": "autonomous", "repo": "agentic"}
+
+    new_args = asyncio.run(
+        capability.before_tool_execute(
+            ctx=SimpleNamespace(),
+            call=SimpleNamespace(),
+            tool_def=tool_def,
+            args=args,
+        )
+    )
+
+    assert new_args is args
+
+
+def test_before_tool_execute_handles_non_string_page_name() -> None:
+    """If ``pageName`` isn't a string (defensive), don't try to rewrite."""
+    capability = WikiSkillCapability(skills=[])
+    tool_def = SimpleNamespace(name="gitea_wiki_read")
+    args = {"pageName": None, "method": "get"}
+
+    new_args = asyncio.run(
+        capability.before_tool_execute(
+            ctx=SimpleNamespace(),
+            call=SimpleNamespace(),
+            tool_def=tool_def,
+            args=args,
+        )
+    )
+
+    assert new_args is args
+    assert new_args["pageName"] is None
+
+
+def test_before_tool_execute_preserves_subpage_dot_dash_suffix() -> None:
+    """Sub-page skill slugs end in ``.-``; rewriting it would 404 the request.
+
+    Regression test for review feedback on PR #220: a configured skill URL
+    like ``http://gitea.ai/autonomous/agentic/wiki/Skills/Issue-Triage.-``
+    (the format the capability itself documents in its module docstring
+    and that :func:`parse_wiki_url` returns verbatim) carries the Gitea
+    sub-page slug with a ``.-`` suffix. The MCP ``pageName`` parameter
+    must be passed through unchanged — the Gitea wiki API expects the
+    slug form, not the natural ``Skills/Issue Triage. `` form. The
+    rewrite must therefore skip any ``pageName`` ending in ``.-`` even
+    though it contains ``-`` characters earlier in the string.
+    """
+    capability = WikiSkillCapability(skills=[])
+    tool_def = SimpleNamespace(name="gitea_wiki_read")
+    args = {
+        "method": "get",
+        "owner": "autonomous",
+        "repo": "agentic",
+        "pageName": "Skills/Issue-Triage.-",
+    }
+
+    new_args = asyncio.run(
+        capability.before_tool_execute(
+            ctx=SimpleNamespace(),
+            call=SimpleNamespace(),
+            tool_def=tool_def,
+            args=args,
+        )
+    )
+
+    # Identity return: skip path must not allocate a new dict.
+    assert new_args is args
+    # The sub-page slug must survive untouched — in particular, the ``.-``
+    # suffix must not be turned into ``. `` (which is what an unconditional
+    # ``str.replace('-', ' ')`` would do, and the exact failure that
+    # the review on PR #220 flagged).
+    assert new_args["pageName"] == "Skills/Issue-Triage.-"
+
+
+def test_before_tool_execute_preserves_dot_dash_suffix_on_top_level_page() -> None:
+    """Top-level pageName ending in ``.-`` is also left untouched (defensive).
+
+    The ``.-`` suffix is the canonical marker for "this is a Gitea slug,
+    not the natural title" — even if it somehow appears on a top-level
+    page (e.g. a skill whose title happens to end with a literal ``.-``,
+    or a hand-written URL in a profile), the hook must preserve it. The
+    Gitea wiki API treats the slug as opaque; rewriting any ``-`` in it
+    is unsafe.
+    """
+    capability = WikiSkillCapability(skills=[])
+    tool_def = SimpleNamespace(name="gitea_wiki_read")
+    args = {"pageName": "Foo.-"}
+
+    new_args = asyncio.run(
+        capability.before_tool_execute(
+            ctx=SimpleNamespace(),
+            call=SimpleNamespace(),
+            tool_def=tool_def,
+            args=args,
+        )
+    )
+
+    assert new_args is args
+    assert new_args["pageName"] == "Foo.-"
