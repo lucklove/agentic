@@ -25,6 +25,7 @@ from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
     ModelResponse,
+    RetryPromptPart,
     ToolCallPart,
     ToolReturnPart,
 )
@@ -161,9 +162,18 @@ def close_pending_tool_calls(
     """Append a synthetic ``ModelRequest`` that closes dangling tool calls.
 
     Walks *history* for ``ToolCallPart`` entries that have no matching
-    ``ToolReturnPart`` (i.e. the previous run aborted before the tool
-    produced a result) and emits one ``ToolReturnPart(outcome='interrupted')``
-    per dangling call in a fresh ``ModelRequest`` appended to the end.
+    ``ToolReturnPart`` or ``RetryPromptPart`` (i.e. the previous run aborted
+    before the tool produced a result) and emits one
+    ``ToolReturnPart(outcome='interrupted')`` per dangling call in a fresh
+    ``ModelRequest`` appended to the end.
+
+    ``RetryPromptPart`` must be treated as a closure: pydantic-ai emits it
+    when a tool raised ``ModelRetry``, returned an unknown tool name, or
+    triggered a pydantic validation error. Those responses carry a
+    ``tool_call_id`` and *do* settle the call from pydantic-ai's perspective
+    — emitting a second synthetic ``ToolReturnPart`` for the same id
+    produces a malformed history that model APIs reject with HTTP 400 on the
+    next resume.
 
     The returned list is the original *history* unchanged when nothing is
     dangling, so callers can use the return value directly for
@@ -185,7 +195,13 @@ def close_pending_tool_calls(
     for message in history:
         if isinstance(message, ModelRequest):
             for part in message.parts:
-                if isinstance(part, ToolReturnPart):
+                # Both ToolReturnPart (tool succeeded) and RetryPromptPart
+                # (tool failed / validation error) close the matching
+                # ToolCallPart from pydantic-ai's perspective. Treating
+                # only the success path as "seen" was the bug that
+                # produced duplicate tool_call_id responses and 400 errors
+                # on resume.
+                if isinstance(part, (ToolReturnPart, RetryPromptPart)):
                     seen_call_ids.add(part.tool_call_id)
 
     dangling: list[ToolCallPart] = []

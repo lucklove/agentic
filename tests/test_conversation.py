@@ -7,6 +7,7 @@ from pathlib import Path
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
+    RetryPromptPart,
     ToolCallPart,
     ToolReturnPart,
     UserPromptPart,
@@ -299,3 +300,116 @@ def test_close_pending_tool_calls_survives_pickle_round_trip(tmp_path: Path) -> 
     assert isinstance(part, ToolReturnPart)
     assert part.tool_call_id == "c1"
     assert part.outcome == "interrupted"
+
+
+def test_close_pending_tool_calls_treats_retry_prompt_as_closure() -> None:
+    """A tool call that came back as a ``RetryPromptPart`` is *closed* —
+    pydantic-ai does not re-issue it on resume, so we must NOT append a
+    synthetic ``ToolReturnPart(outcome='interrupted')`` for the same id.
+    Otherwise the next ``iter(message_history=...)`` sees two responses for
+    one ``tool_call_id`` and the model provider returns HTTP 400.
+
+    Mirrors the autonomous/agentic#237 scenario: 5 ``run_code`` calls that
+    errored out (ModuleNotFoundError, GetContentsOrList err, unknown
+    method) all came back as ``RetryPromptPart``; the older implementation
+    treated them as pending and wrote 5 duplicate synthetic closures.
+    """
+    history = [
+        ModelRequest(parts=[UserPromptPart(content="hi")]),
+        ModelResponse(
+            parts=[
+                ToolCallPart(tool_name="run_code", args={}, tool_call_id="c1"),
+                ToolCallPart(tool_name="run_code", args={}, tool_call_id="c2"),
+            ],
+        ),
+        ModelRequest(
+            parts=[
+                RetryPromptPart(
+                    tool_name="run_code",
+                    content="RuntimeError: No module named 'subprocess'",
+                    tool_call_id="c1",
+                ),
+                RetryPromptPart(
+                    tool_name="run_code",
+                    content="Exception: get file err: GetContentsOrList",
+                    tool_call_id="c2",
+                ),
+            ],
+        ),
+    ]
+
+    fixed = close_pending_tool_calls(history, reason="CancelledError: ")
+
+    assert fixed is history, (
+        "all tool calls already have RetryPromptPart responses; nothing "
+        "should be appended"
+    )
+    assert len(fixed) == 3
+
+
+def test_close_pending_tool_calls_does_not_duplicate_response_for_retry_prompt() -> (
+    None
+):
+    """Regression: previously the helper only tracked ``ToolReturnPart``,
+    so any tool call that came back as ``RetryPromptPart`` got a *second*
+    synthetic ``ToolReturnPart(outcome='interrupted')`` appended on top of
+    its real response. Loading that history back into a pydantic-ai agent
+    causes the model API to reject the request with HTTP 400.
+    """
+    history = [
+        ModelRequest(parts=[UserPromptPart(content="hi")]),
+        ModelResponse(
+            parts=[ToolCallPart(tool_name="run_code", args={}, tool_call_id="c1")],
+        ),
+        ModelRequest(
+            parts=[
+                RetryPromptPart(
+                    tool_name="run_code",
+                    content="some error",
+                    tool_call_id="c1",
+                ),
+            ],
+        ),
+    ]
+
+    fixed = close_pending_tool_calls(history, reason="CancelledError: ")
+
+    # Only one response for c1, no synthetic interruption appended.
+    assert len(fixed) == 3
+    responses = [
+        p
+        for m in fixed
+        if isinstance(m, ModelRequest)
+        for p in m.parts
+        if isinstance(p, (ToolReturnPart, RetryPromptPart))
+    ]
+    assert len(responses) == 1
+    assert isinstance(responses[0], RetryPromptPart)
+    assert responses[0].tool_call_id == "c1"
+
+
+def test_close_pending_tool_calls_mixes_return_and_retry_prompt() -> None:
+    """A history with mixed ToolReturnPart + RetryPromptPart closures
+    should not get any synthetic append for those closed ids — both
+    kinds of response settle their matching ToolCallPart.
+    """
+    history = [
+        ModelRequest(parts=[UserPromptPart(content="hi")]),
+        ModelResponse(
+            parts=[
+                ToolCallPart(tool_name="a", args={}, tool_call_id="c1"),
+                ToolCallPart(tool_name="b", args={}, tool_call_id="c2"),
+            ],
+        ),
+        ModelRequest(
+            parts=[
+                ToolReturnPart(tool_name="a", content="ok", tool_call_id="c1"),
+                RetryPromptPart(tool_name="b", content="bad", tool_call_id="c2"),
+            ],
+        ),
+    ]
+
+    fixed = close_pending_tool_calls(history, reason="CancelledError: ")
+
+    assert fixed is history, "both tool calls already settled; no append"
+    assert len(fixed) == 3
