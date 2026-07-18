@@ -257,6 +257,7 @@ async def _build_runtime(
     agent = make_agent(
         profile,
         global_cfg,
+        working_dir,
         deps,
     )
     return AgentRuntime(

@@ -48,15 +48,6 @@ __all__ = ["make_agent"]
 _CapabilityFactory = Callable[[dict[str, Any]], AbstractCapability]
 
 _AGENTIC_DIR = Path.home() / ".agentic"
-_SKILLS_DIR_BASE = Path(__file__).resolve().parent
-
-
-def _resolve_working_dir(working_dir: str) -> Path:
-    """Resolve *working_dir* to an absolute path (relative to agent_factory.py dir)."""
-    resolved = Path(working_dir).expanduser()
-    if not resolved.is_absolute():
-        resolved = _SKILLS_DIR_BASE / resolved
-    return resolved.resolve()
 
 
 def _make_skills_capability(
@@ -137,19 +128,22 @@ def _build_registry(
 def make_agent(
     profile: ProfileConfig,
     global_cfg: GlobalConfig,
+    working_dir: Path,
     deps: AgentDeps,
 ) -> Agent[AgentDeps, str]:
     """Build and return an Agent configured from *profile*.
 
     Args:
-        profile:    Loaded profile config (model, capabilities, instructions…).
-        global_cfg: Global config (Gitea base URL, MCP command).
-        deps:       Shared runtime deps. ``gitea_username`` and ``working_dir``
-                    are substituted into instructions as ``$gitea_username``
-                    and ``$working_dir``.
+        profile:     Loaded profile config (model, capabilities, instructions…).
+        global_cfg:  Global config (Gitea base URL, MCP command).
+        working_dir: Already-resolved absolute working directory. The caller
+                     (e.g. ``main._build_runtime``) is responsible for resolving
+                     it; ``make_agent`` does not resolve it itself so the
+                     path-resolution helper is not duplicated between modules.
+        deps:        Shared runtime deps. ``gitea_username`` and ``working_dir``
+                     are substituted into instructions as ``$gitea_username``
+                     and ``$working_dir``.
     """
-    working_dir = _resolve_working_dir(profile.working_dir or global_cfg.working_dir)
-
     registry = _build_registry(
         global_cfg,
         profile,

@@ -8,7 +8,7 @@ import pytest
 from pydantic_ai import ModelSettings
 from pydantic_ai_harness import CodeMode
 
-from agent_factory import _build_registry, _resolve_working_dir
+from agent_factory import _build_registry
 from capabilities.compaction import (
     AnchoredCompaction,
     AnthropicCompaction,
@@ -29,7 +29,9 @@ def _registry() -> dict:
         gitea=GiteaProfileConfig(token="token"),
         instructions="test",
     )
-    working_dir = _resolve_working_dir(profile.working_dir or global_cfg.working_dir)
+    working_dir = (
+        Path(profile.working_dir or global_cfg.working_dir).expanduser().resolve()
+    )
     return _build_registry(global_cfg, profile, working_dir)
 
 
@@ -125,7 +127,9 @@ def test_registry_builds_code_exec_with_mount_from_profile_working_dir(
         instructions="test",
         working_dir=str(profile_work),
     )
-    working_dir = _resolve_working_dir(profile.working_dir or global_cfg.working_dir)
+    working_dir = (
+        Path(profile.working_dir or global_cfg.working_dir).expanduser().resolve()
+    )
     capability = _build_registry(global_cfg, profile, working_dir)["code_exec"]({})
 
     assert isinstance(capability, CodeMode)
@@ -150,7 +154,9 @@ def test_registry_builds_code_exec_falls_back_to_global_working_dir(
         gitea=GiteaProfileConfig(token="token"),
         instructions="test",
     )
-    working_dir = _resolve_working_dir(profile.working_dir or global_cfg.working_dir)
+    working_dir = (
+        Path(profile.working_dir or global_cfg.working_dir).expanduser().resolve()
+    )
     capability = _build_registry(global_cfg, profile, working_dir)["code_exec"]({})
 
     assert isinstance(capability, CodeMode)
@@ -170,7 +176,9 @@ def test_registry_builds_code_exec_passes_opts(tmp_path: Path) -> None:
         gitea=GiteaProfileConfig(token="token"),
         instructions="test",
     )
-    working_dir = _resolve_working_dir(profile.working_dir or global_cfg.working_dir)
+    working_dir = (
+        Path(profile.working_dir or global_cfg.working_dir).expanduser().resolve()
+    )
     capability = _build_registry(global_cfg, profile, working_dir)["code_exec"](
         {"max_retries": 5, "dynamic_catalog": True}
     )
@@ -193,10 +201,12 @@ def test_make_agent_passes_model_settings() -> None:
         instructions="test",
     )
 
+    working_dir = Path(".")
+
     with patch("agent_factory.Agent") as agent_cls, patch(
         "agent_factory.build_model", return_value="model"
     ):
-        make_agent(profile, global_cfg, _deps())
+        make_agent(profile, global_cfg, working_dir, _deps())
 
     kwargs = agent_cls.call_args.kwargs
     assert kwargs["model_settings"] == ModelSettings(thinking="high")
@@ -216,10 +226,12 @@ def test_make_agent_appends_global_instructions_after_profile() -> None:
         instructions="profile first",
     )
 
+    working_dir = Path(".")
+
     with patch("agent_factory.Agent") as agent_cls, patch(
         "agent_factory.build_model", return_value="model"
     ):
-        make_agent(profile, global_cfg, _deps())
+        make_agent(profile, global_cfg, working_dir, _deps())
 
     kwargs = agent_cls.call_args.kwargs
     assert kwargs["instructions"] == "profile first\n\nshared for code_agent"
@@ -247,7 +259,7 @@ def test_make_agent_substitutes_working_dir_in_instructions(
     with patch("agent_factory.Agent") as agent_cls, patch(
         "agent_factory.build_model", return_value="model"
     ):
-        make_agent(profile, global_cfg, _deps())
+        make_agent(profile, global_cfg, work, _deps())
 
     kwargs = agent_cls.call_args.kwargs
     assert kwargs["instructions"] == f"workdir is {work}"
@@ -278,7 +290,7 @@ def test_make_agent_substitutes_working_dir_from_profile(
     with patch("agent_factory.Agent") as agent_cls, patch(
         "agent_factory.build_model", return_value="model"
     ):
-        make_agent(profile, global_cfg, _deps())
+        make_agent(profile, global_cfg, profile_work, _deps())
 
     kwargs = agent_cls.call_args.kwargs
     assert kwargs["instructions"] == f"workdir is {profile_work}"
@@ -298,8 +310,10 @@ def test_make_agent_rejects_unknown_global_capability() -> None:
         instructions="test",
     )
 
+    working_dir = Path(".")
+
     with pytest.raises(ValueError, match="unknown capability keys: typo_capability"):
-        make_agent(profile, global_cfg, _deps())
+        make_agent(profile, global_cfg, working_dir, _deps())
 
 
 def test_make_agent_rejects_unknown_profile_capability() -> None:
@@ -316,8 +330,10 @@ def test_make_agent_rejects_unknown_profile_capability() -> None:
         capabilities={"typo_capability": {}},
     )
 
+    working_dir = Path(".")
+
     with pytest.raises(ValueError, match="unknown capability keys: typo_capability"):
-        make_agent(profile, global_cfg, _deps())
+        make_agent(profile, global_cfg, working_dir, _deps())
 
 
 def test_registry_builds_skills_capability_from_url_list() -> None:
@@ -339,7 +355,9 @@ def test_registry_builds_skills_capability_from_url_list() -> None:
         captured["token"] = token
         return SimpleNamespace(skills=[])
 
-    working_dir = _resolve_working_dir(profile.working_dir or global_cfg.working_dir)
+    working_dir = (
+        Path(profile.working_dir or global_cfg.working_dir).expanduser().resolve()
+    )
     with patch("agent_factory.make_skills_capability", side_effect=fake_make):
         _build_registry(global_cfg, profile, working_dir)["skills"](
             ["http://gitea.example/autonomous/agentic/wiki/Skills/Foo.-"]
@@ -369,7 +387,9 @@ def test_registry_skills_with_empty_url_list() -> None:
         captured["urls"] = urls
         return SimpleNamespace(skills=[])
 
-    working_dir = _resolve_working_dir(profile.working_dir or global_cfg.working_dir)
+    working_dir = (
+        Path(profile.working_dir or global_cfg.working_dir).expanduser().resolve()
+    )
     with patch("agent_factory.make_skills_capability", side_effect=fake_make):
         _build_registry(global_cfg, profile, working_dir)["skills"]([])
 
@@ -406,7 +426,9 @@ def test_registry_skills_profile_overrides_global() -> None:
         captured["urls"] = urls
         return SimpleNamespace(skills=[])
 
-    working_dir = _resolve_working_dir(profile.working_dir or global_cfg.working_dir)
+    working_dir = (
+        Path(profile.working_dir or global_cfg.working_dir).expanduser().resolve()
+    )
     with patch("agent_factory.make_skills_capability", side_effect=fake_make):
         # effective_capabilities is built in make_agent, so simulate that merge here.
         merged = global_cfg.capabilities | profile.capabilities
@@ -431,7 +453,9 @@ def test_registry_builds_mcp_capability() -> None:
         instructions="test",
     )
 
-    working_dir = _resolve_working_dir(profile.working_dir or global_cfg.working_dir)
+    working_dir = (
+        Path(profile.working_dir or global_cfg.working_dir).expanduser().resolve()
+    )
     registry = _build_registry(global_cfg, profile, working_dir)
     assert "mcp" in registry
 
