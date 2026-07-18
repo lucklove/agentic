@@ -15,7 +15,16 @@ Polling loop
    agent) also mark the notification read before returning, since no
    progress can be made on them.
 
-Errors are not caught here; they propagate to the caller and exit the process.
+Failure isolation (issue #237)
+-----------------------------
+Per-notification ``Exception`` (including tool / agent / model errors)
+raised inside ``_run_agent_iter`` are caught at the
+``_handle_notification`` boundary: the partial message history has
+already been persisted by ``_run_agent_iter`` via
+``close_pending_tool_calls``, so we just log the failure, post a
+comment with the conversation marker and the error message so the
+human sees what happened, and return. ``BaseException`` subclasses
+(``KeyboardInterrupt``, ``asyncio.CancelledError``) still propagate.
 """
 
 from __future__ import annotations
@@ -410,6 +419,15 @@ async def _handle_notification(
     new comment that lands mid-handling cannot end up being silently marked
     read by a PATCH that races past it. Every skip path marks the
     notification read for the same reason.
+
+    Per-notification agent failures are caught here (Layer 1 isolation —
+    issue #237): ``_run_agent_iter`` has already persisted the partial
+    message history via ``close_pending_tool_calls``, so this function
+    logs the failure, posts a comment with the conversation marker and
+    the error message so the human sees what happened, and returns so
+    ``poll_once`` can move on to the next notification. ``Exception``
+    is caught (not ``BaseException``) so ``KeyboardInterrupt`` and
+    ``asyncio.CancelledError`` still propagate to the caller.
     """
     notif_ctx = NotificationContext(http=http, notif=notif)
 
@@ -498,19 +516,39 @@ async def _handle_notification(
             )
             history = load_history(run_deps.messages_dir, key)
 
-        result = await _run_agent_iter(
-            agent,
-            input_message,
-            run_deps,
-            request_limit,
-            history,
-        )
-
-        # Post agent output as a comment with conversation marker.
-        comment_body = (
-            f"{marker_for(deps.gitea_username, max_delivered_comment_id)}"
-            f"\n\n{result.output}"
-        )
+        try:
+            result = await _run_agent_iter(
+                agent,
+                input_message,
+                run_deps,
+                request_limit,
+                history,
+            )
+        except Exception as exc:
+            # ``_run_agent_iter`` already saved the partial message history
+            # via ``close_pending_tool_calls``; we just log, post an error
+            # comment so the human sees the failure, then return so
+            # ``poll_once`` continues with the next notification instead of
+            # letting the exception kill the polling process. ``Exception``
+            # (not ``BaseException``) so ``KeyboardInterrupt`` and
+            # ``asyncio.CancelledError`` still propagate.
+            logfire.exception(
+                "agent run failed; partial history persisted, posting error comment",
+                repo=notif_ctx.repo_full_name,
+                number=notif_ctx.number,
+                gitea_username=deps.gitea_username,
+                exception_type=type(exc).__name__,
+            )
+            comment_body = (
+                f"{marker_for(deps.gitea_username, max_delivered_comment_id)}"
+                f"\n\n{type(exc).__name__}: {exc}"
+            )
+        else:
+            # Post agent output as a comment with conversation marker.
+            comment_body = (
+                f"{marker_for(deps.gitea_username, max_delivered_comment_id)}"
+                f"\n\n{result.output}"
+            )
         await http.post(
             _SUBJECT_PATH_TEMPLATE.substitute(
                 owner=notif_subject.owner,

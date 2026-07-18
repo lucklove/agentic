@@ -336,15 +336,30 @@ def test_handle_notification_marks_thread_read_even_when_agent_fails(
     deps: AgentDeps,
 ) -> None:
     """Mark-read happens before the run, so it persists even when the run
-    raises. The exception still propagates, but the notification is gone."""
+    raises. Per issue #237 (layer 1), ``_handle_notification`` catches the
+    exception and posts an error comment instead of letting it propagate."""
 
     async def run() -> None:
         http = FakeHTTP()
 
-        with pytest.raises(RuntimeError, match="simulated underlying tool failure"):
-            await _handle_notification(FailingAgent(), http, notification(), deps)
+        # No pytest.raises: the exception must NOT escape — it would kill
+        # the polling process and take down every other agent in the same
+        # process (issue #237).
+        await _handle_notification(FailingAgent(), http, notification(), deps)
 
         assert http.patches == ["/api/v1/notifications/threads/123"]
+
+        # An error comment is posted with the conversation marker so the
+        # human sees the failure and so the next poll treats this thread
+        # as already-handled (no re-prompt loop).
+        assert len(http.posts) == 1
+        path, body = http.posts[0]
+        assert path.endswith("/issues/31/comments")
+        assert body["body"].startswith(
+            "<!-- agentic:@code_agent last_seen_comment_id=1 -->"
+        )
+        assert "RuntimeError" in body["body"]
+        assert "simulated underlying tool failure" in body["body"]
 
     asyncio.run(run())
 
@@ -385,8 +400,9 @@ def test_handle_notification_saves_partial_history_when_agent_fails(
         http = FakeHTTP()
         agent = FailingAgent(messages=prior_messages)
 
-        with pytest.raises(RuntimeError, match="simulated underlying tool failure"):
-            await _handle_notification(agent, http, notification(), deps)
+        # No pytest.raises: layer-1 isolation catches the exception
+        # (issue #237). Partial history must still be persisted.
+        await _handle_notification(agent, http, notification(), deps)
 
         # Mark-read already happened before the run; the failure doesn't undo it.
         assert http.patches == ["/api/v1/notifications/threads/123"]
@@ -403,6 +419,108 @@ def test_handle_notification_saves_partial_history_when_agent_fails(
         assert closing[0].tool_call_id == "call-x"
         assert closing[0].outcome == "interrupted"
         assert "simulated underlying tool failure" in closing[0].content
+
+        # Error comment was posted on the issue, with the conversation
+        # marker so the next poll treats the thread as already-handled.
+        assert len(http.posts) == 1
+        path, body = http.posts[0]
+        assert path.endswith("/issues/31/comments")
+        assert body["body"].startswith(
+            "<!-- agentic:@code_agent last_seen_comment_id=1 -->"
+        )
+        assert "RuntimeError" in body["body"]
+        assert "simulated underlying tool failure" in body["body"]
+
+    asyncio.run(run())
+
+
+def test_handle_notification_does_not_swallow_cancellation(deps: AgentDeps) -> None:
+    """``asyncio.CancelledError`` must propagate past layer-1 isolation.
+
+    We catch ``Exception`` (not ``BaseException``) in
+    ``_handle_notification`` precisely so that ``CancelledError`` and
+    ``KeyboardInterrupt`` keep working as shutdown signals. If this test
+    ever passes without raising, the isolation layer has accidentally
+    widened its catch and swallowed shutdown.
+    """
+
+    class _CancellingAgent:
+        def iter(
+            self,
+            message: str,
+            *,
+            deps: AgentDeps,
+            usage_limits: object | None = None,
+            message_history: object | None = None,
+        ) -> _FakeIterCM:
+            return _RaisingIterCM(asyncio.CancelledError(), messages=[])
+
+        async def run(self, *args: object, **kwargs: object) -> object:
+            raise RuntimeError("only .iter() is supported")
+
+    async def run() -> None:
+        http = FakeHTTP()
+
+        try:
+            await _handle_notification(_CancellingAgent(), http, notification(), deps)
+        except asyncio.CancelledError:
+            pass
+        except BaseException as exc:
+            pytest.fail(
+                f"expected asyncio.CancelledError, got {type(exc).__name__}: {exc}"
+            )
+        else:
+            pytest.fail("expected asyncio.CancelledError to propagate")
+
+        # No error comment posted: cancellation interrupted the run before
+        # we ever reached the except branch.
+        assert http.posts == []
+        # Mark-read still happened (it ran before _run_agent_iter).
+        assert http.patches == ["/api/v1/notifications/threads/123"]
+
+    asyncio.run(run())
+
+
+def test_handle_notification_error_comment_carries_max_delivered_comment_id(
+    deps: AgentDeps,
+) -> None:
+    """The error comment's marker must reflect the highest comment id
+    that was about to be delivered to the agent, not just default 0.
+
+    Reason: the next poll cycle reads ``last_seen_comment_id`` from the
+    marker to know where to resume. If the error comment said
+    ``last_seen_comment_id=0``, the next poll would re-deliver comments
+    1 and 2 to a freshly-loaded agent, which (a) wastes a model call and
+    (b) could cause the agent to re-attempt the same operation that just
+    failed.
+    """
+
+    async def run() -> None:
+        http = FakeHTTP(
+            comments=[
+                {
+                    "id": 1,
+                    "body": "please handle @code_agent",
+                    "user": {"login": "human"},
+                },
+                {
+                    "id": 2,
+                    "body": "second mention @code_agent",
+                    "user": {"login": "human"},
+                },
+            ]
+        )
+        agent = FailingAgent()
+
+        await _handle_notification(agent, http, notification(), deps)
+
+        assert len(http.posts) == 1
+        path, body = http.posts[0]
+        assert path.endswith("/issues/31/comments")
+        assert body["body"].startswith(
+            "<!-- agentic:@code_agent last_seen_comment_id=2 -->"
+        )
+        assert "RuntimeError" in body["body"]
 
     asyncio.run(run())
 
