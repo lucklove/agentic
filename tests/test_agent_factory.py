@@ -8,7 +8,7 @@ import pytest
 from pydantic_ai import ModelSettings
 from pydantic_ai_harness import CodeMode
 
-from agent_factory import _build_registry
+from agent_factory import _build_registry, _resolve_working_dir
 from capabilities.compaction import (
     AnchoredCompaction,
     AnthropicCompaction,
@@ -29,7 +29,8 @@ def _registry() -> dict:
         gitea=GiteaProfileConfig(token="token"),
         instructions="test",
     )
-    return _build_registry(global_cfg, profile)
+    working_dir = _resolve_working_dir(profile.working_dir or global_cfg.working_dir)
+    return _build_registry(global_cfg, profile, working_dir)
 
 
 def _deps() -> AgentDeps:
@@ -124,7 +125,8 @@ def test_registry_builds_code_exec_with_mount_from_profile_working_dir(
         instructions="test",
         working_dir=str(profile_work),
     )
-    capability = _build_registry(global_cfg, profile)["code_exec"]({})
+    working_dir = _resolve_working_dir(profile.working_dir or global_cfg.working_dir)
+    capability = _build_registry(global_cfg, profile, working_dir)["code_exec"]({})
 
     assert isinstance(capability, CodeMode)
     assert capability.mount is not None
@@ -148,7 +150,8 @@ def test_registry_builds_code_exec_falls_back_to_global_working_dir(
         gitea=GiteaProfileConfig(token="token"),
         instructions="test",
     )
-    capability = _build_registry(global_cfg, profile)["code_exec"]({})
+    working_dir = _resolve_working_dir(profile.working_dir or global_cfg.working_dir)
+    capability = _build_registry(global_cfg, profile, working_dir)["code_exec"]({})
 
     assert isinstance(capability, CodeMode)
     assert capability.mount is not None
@@ -167,7 +170,8 @@ def test_registry_builds_code_exec_passes_opts(tmp_path: Path) -> None:
         gitea=GiteaProfileConfig(token="token"),
         instructions="test",
     )
-    capability = _build_registry(global_cfg, profile)["code_exec"](
+    working_dir = _resolve_working_dir(profile.working_dir or global_cfg.working_dir)
+    capability = _build_registry(global_cfg, profile, working_dir)["code_exec"](
         {"max_retries": 5, "dynamic_catalog": True}
     )
 
@@ -335,8 +339,9 @@ def test_registry_builds_skills_capability_from_url_list() -> None:
         captured["token"] = token
         return SimpleNamespace(skills=[])
 
+    working_dir = _resolve_working_dir(profile.working_dir or global_cfg.working_dir)
     with patch("agent_factory.make_skills_capability", side_effect=fake_make):
-        _build_registry(global_cfg, profile)["skills"](
+        _build_registry(global_cfg, profile, working_dir)["skills"](
             ["http://gitea.example/autonomous/agentic/wiki/Skills/Foo.-"]
         )
 
@@ -364,8 +369,9 @@ def test_registry_skills_with_empty_url_list() -> None:
         captured["urls"] = urls
         return SimpleNamespace(skills=[])
 
+    working_dir = _resolve_working_dir(profile.working_dir or global_cfg.working_dir)
     with patch("agent_factory.make_skills_capability", side_effect=fake_make):
-        _build_registry(global_cfg, profile)["skills"]([])
+        _build_registry(global_cfg, profile, working_dir)["skills"]([])
 
     assert captured["urls"] == []
 
@@ -400,10 +406,11 @@ def test_registry_skills_profile_overrides_global() -> None:
         captured["urls"] = urls
         return SimpleNamespace(skills=[])
 
+    working_dir = _resolve_working_dir(profile.working_dir or global_cfg.working_dir)
     with patch("agent_factory.make_skills_capability", side_effect=fake_make):
         # effective_capabilities is built in make_agent, so simulate that merge here.
         merged = global_cfg.capabilities | profile.capabilities
-        _build_registry(global_cfg, profile)["skills"](merged["skills"])
+        _build_registry(global_cfg, profile, working_dir)["skills"](merged["skills"])
 
     assert captured["urls"] == [
         "http://gitea.example/owner/repo/wiki/Profile-A.-",
@@ -424,7 +431,8 @@ def test_registry_builds_mcp_capability() -> None:
         instructions="test",
     )
 
-    registry = _build_registry(global_cfg, profile)
+    working_dir = _resolve_working_dir(profile.working_dir or global_cfg.working_dir)
+    registry = _build_registry(global_cfg, profile, working_dir)
     assert "mcp" in registry
 
     with patch("agent_factory.make_mcp_capability") as mock_make:

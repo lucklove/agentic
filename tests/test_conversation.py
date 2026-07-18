@@ -4,9 +4,16 @@ import logging
 import pickle
 from pathlib import Path
 
-from pydantic_ai.messages import ModelRequest, UserPromptPart
+from pydantic_ai.messages import (
+    ModelRequest,
+    ModelResponse,
+    ToolCallPart,
+    ToolReturnPart,
+    UserPromptPart,
+)
 
 from conversation import (
+    close_pending_tool_calls,
     is_conversation_comment,
     last_seen_comment_id_from_marker,
     load_history,
@@ -183,3 +190,112 @@ def test_save_history_creates_directory(tmp_path: Path) -> None:
     assert (nested / "key.pkl").exists()
     loaded = load_history(nested, "key")
     assert len(loaded) == 1
+
+
+def test_close_pending_tool_calls_returns_unchanged_when_no_dangling() -> None:
+    history = [
+        ModelRequest(parts=[UserPromptPart(content="hi")]),
+        ModelResponse(
+            parts=[ToolCallPart(tool_name="ok", args={}, tool_call_id="c1")],
+        ),
+        ModelRequest(
+            parts=[
+                ToolReturnPart(tool_name="ok", content="ok-result", tool_call_id="c1")
+            ],
+        ),
+    ]
+
+    fixed = close_pending_tool_calls(history, reason="boom")
+
+    assert fixed is history
+    assert len(fixed) == 3
+
+
+def test_close_pending_tool_calls_appends_interrupted_return() -> None:
+    history = [
+        ModelRequest(parts=[UserPromptPart(content="hi")]),
+        ModelResponse(
+            parts=[ToolCallPart(tool_name="boom", args={}, tool_call_id="c1")],
+        ),
+    ]
+
+    fixed = close_pending_tool_calls(history, reason="RuntimeError: kaboom")
+
+    assert len(fixed) == 3
+    assert fixed[:2] == history  # original entries preserved as-is
+    closing = fixed[2]
+    assert isinstance(closing, ModelRequest)
+    assert len(closing.parts) == 1
+    part = closing.parts[0]
+    assert isinstance(part, ToolReturnPart)
+    assert part.tool_call_id == "c1"
+    assert part.tool_name == "boom"
+    assert part.outcome == "interrupted"
+    assert "RuntimeError: kaboom" in part.content
+
+
+def test_close_pending_tool_calls_closes_multiple_dangling_calls() -> None:
+    history = [
+        ModelRequest(parts=[UserPromptPart(content="hi")]),
+        ModelResponse(
+            parts=[
+                ToolCallPart(tool_name="a", args={}, tool_call_id="c1"),
+                ToolCallPart(tool_name="b", args={}, tool_call_id="c2"),
+            ],
+        ),
+    ]
+
+    fixed = close_pending_tool_calls(history, reason="crash")
+
+    closing = fixed[-1]
+    assert isinstance(closing, ModelRequest)
+    by_id = {p.tool_call_id: p for p in closing.parts}
+    assert set(by_id) == {"c1", "c2"}
+    for part in by_id.values():
+        assert part.outcome == "interrupted"
+        assert "crash" in part.content
+
+
+def test_close_pending_tool_calls_only_closes_unmatched_calls() -> None:
+    history = [
+        ModelRequest(parts=[UserPromptPart(content="hi")]),
+        ModelResponse(
+            parts=[
+                ToolCallPart(tool_name="ok", args={}, tool_call_id="c1"),
+                ToolCallPart(tool_name="boom", args={}, tool_call_id="c2"),
+            ],
+        ),
+        ModelRequest(
+            parts=[ToolReturnPart(tool_name="ok", content="ok", tool_call_id="c1")],
+        ),
+    ]
+
+    fixed = close_pending_tool_calls(history, reason="oops")
+
+    closing = fixed[-1]
+    assert isinstance(closing, ModelRequest)
+    assert len(closing.parts) == 1
+    assert closing.parts[0].tool_call_id == "c2"
+    assert closing.parts[0].outcome == "interrupted"
+
+
+def test_close_pending_tool_calls_survives_pickle_round_trip(tmp_path: Path) -> None:
+    history = [
+        ModelRequest(parts=[UserPromptPart(content="hi")]),
+        ModelResponse(
+            parts=[ToolCallPart(tool_name="boom", args={}, tool_call_id="c1")],
+        ),
+    ]
+
+    fixed = close_pending_tool_calls(history, reason="boom")
+    key = "round-trip"
+    save_history(tmp_path, key, fixed)
+    loaded = load_history(tmp_path, key)
+
+    assert len(loaded) == 3
+    closing = loaded[-1]
+    assert isinstance(closing, ModelRequest)
+    part = closing.parts[0]
+    assert isinstance(part, ToolReturnPart)
+    assert part.tool_call_id == "c1"
+    assert part.outcome == "interrupted"

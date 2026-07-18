@@ -81,6 +81,7 @@ def _make_skills_capability(
 def _build_registry(
     global_cfg: GlobalConfig,
     profile: ProfileConfig,
+    working_dir: Path,
     *,
     profile_name: str = "",
 ) -> dict[str, _CapabilityFactory]:
@@ -95,9 +96,6 @@ def _build_registry(
         if profile_name
         else ".memories.json"
     )
-
-    raw_working_dir = profile.working_dir or global_cfg.working_dir
-    working_dir = _resolve_working_dir(raw_working_dir)
 
     return {
         "code_exec": lambda opts: CodeMode(
@@ -150,9 +148,12 @@ def make_agent(
                     are substituted into instructions as ``$gitea_username``
                     and ``$working_dir``.
     """
+    working_dir = _resolve_working_dir(profile.working_dir or global_cfg.working_dir)
+
     registry = _build_registry(
         global_cfg,
         profile,
+        working_dir,
         profile_name=deps.profile_name,
     )
 
@@ -172,8 +173,6 @@ def make_agent(
         for instruction in [profile.instructions, global_cfg.instructions]
         if instruction
     )
-    raw_working_dir = profile.working_dir or global_cfg.working_dir
-    working_dir = _resolve_working_dir(raw_working_dir)
     instructions = Template(raw_instructions).safe_substitute(
         gitea_username=deps.gitea_username,
         working_dir=str(working_dir),

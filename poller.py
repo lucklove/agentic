@@ -4,10 +4,16 @@ Polling loop
 ------------
 1. ``GET /api/v1/notifications?all=false`` — fetch only unread notifications.
 2. Filter to Issue/PR notifications triggered by a comment or mention.
-3. For each matching notification, run the agent inside a logfire span.
-4. Mark the notification as read only after it is successfully handled or
-   intentionally skipped. If the agent or an underlying tool raises, leave the
-   notification unread so it remains visible for retry or human intervention.
+3. For each matching notification, mark it as read **before** reading its
+   comments, then run the agent inside a logfire span. Marking before
+   ``get_comments`` (and before any post that follows the run) means a
+   comment that lands mid-handling becomes a separate, still-unread
+   notification that the next poll will pick up; if we marked read after
+   the run, that fresh comment could be silently absorbed into the
+   notification we just marked read and disappear.
+4. Skip paths (closed subject, open dependencies, comment unrelated to this
+   agent) also mark the notification read before returning, since no
+   progress can be made on them.
 
 Errors are not caught here; they propagate to the caller and exit the process.
 """
@@ -16,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import sys
 from dataclasses import dataclass, replace
 from string import Template
 from typing import Any
@@ -23,11 +30,15 @@ from typing import Any
 import httpx
 import logfire
 from pydantic_ai import Agent
+from pydantic_ai._agent_graph import End
+from pydantic_ai.messages import ModelMessage
 from pydantic_ai.retries import AsyncTenacityTransport, RetryConfig, wait_retry_after
+from pydantic_ai.run import AgentRunResult
 from pydantic_ai.usage import UsageLimits
 from tenacity import RetryCallState, retry_if_exception_type, wait_exponential
 
 from conversation import (
+    close_pending_tool_calls,
     is_conversation_comment,
     last_seen_comment_id_from_marker,
     load_history,
@@ -315,6 +326,76 @@ async def _mark_notification_read(
     await http.patch(f"/api/v1/notifications/threads/{notif_ctx.id}")
 
 
+async def _run_agent_iter(
+    agent: Agent[AgentDeps, str],
+    input_message: str,
+    run_deps: AgentDeps,
+    request_limit: int,
+    history: list[ModelMessage],
+) -> AgentRunResult[Any]:
+    """Drive ``agent.iter`` to completion, persisting history on both paths.
+
+    On success returns the run's ``AgentRunResult``. On failure snapshots
+    the partial message history that the ``AgentRun`` accumulated up to
+    the exception, closes any dangling tool calls with a synthetic
+    ``ToolReturnPart(outcome='interrupted')`` so the next ``iter`` can
+    resume the conversation without pydantic-ai's "unprocessed tool calls"
+    error, persists that history when ``run_deps.messages_dir`` and
+    ``run_deps.notification_subject`` are both set, then re-raises the
+    original exception.
+
+    The snapshot is taken **inside** the ``async with agent.iter(...)``
+    block so the ``AgentRun``'s internal state is still readable; the
+    surrounding ``finally`` always calls ``__aexit__`` to tear the run
+    down cleanly.
+    """
+    subject = run_deps.notification_subject
+    assert (
+        subject is not None
+    ), "_run_agent_iter requires run_deps.notification_subject to persist history"
+    messages_dir = run_deps.messages_dir
+    history_key = subject_message_key(subject.owner, subject.repo, subject.number)
+
+    iter_ctx = agent.iter(
+        input_message,
+        deps=run_deps,
+        usage_limits=_agent_run_usage_limits(request_limit),
+        message_history=history or None,
+    )
+    run = await iter_ctx.__aenter__()
+    saved_messages: list[ModelMessage] = list(history or [])
+    result: AgentRunResult[Any]
+    try:
+        node = run.next_node
+        while not isinstance(node, End):
+            node = await run.next(node)
+        final = run.result
+        assert final is not None, "AgentRun reached End without populating result"
+        result = final
+        saved_messages = list(result.all_messages())
+        logfire.info("agent output", output=result.output)
+    except BaseException as exc:
+        partial = saved_messages
+        try:
+            partial = list(run.all_messages())
+        except Exception:
+            pass
+        saved_messages = close_pending_tool_calls(
+            partial,
+            reason=f"{type(exc).__name__}: {exc}",
+        )
+        if messages_dir is not None:
+            save_history(messages_dir, history_key, saved_messages)
+        raise
+    finally:
+        await iter_ctx.__aexit__(*sys.exc_info())
+
+    if messages_dir is not None:
+        save_history(messages_dir, history_key, saved_messages)
+
+    return result
+
+
 async def _handle_notification(
     agent: Agent[AgentDeps, str],
     http: httpx.AsyncClient,
@@ -322,7 +403,14 @@ async def _handle_notification(
     deps: AgentDeps,
     request_limit: int = DEFAULT_AGENT_REQUEST_LIMIT,
 ) -> None:
-    """Run the agent for one notification, then mark it as read on success."""
+    """Run the agent for one notification.
+
+    The notification is marked as read as soon as we have committed to
+    handling it — before any ``get_comments`` / ``get_subject`` reads, so a
+    new comment that lands mid-handling cannot end up being silently marked
+    read by a PATCH that races past it. Every skip path marks the
+    notification read for the same reason.
+    """
     notif_ctx = NotificationContext(http=http, notif=notif)
 
     with logfire.span(
@@ -344,7 +432,9 @@ async def _handle_notification(
                 number=notif_ctx.number,
                 gitea_username=deps.gitea_username,
             )
-        elif open_dependencies := await notif_ctx.open_dependencies():
+            await _mark_notification_read(http, notif_ctx)
+            return
+        if open_dependencies := await notif_ctx.open_dependencies():
             logfire.info(
                 "skip notification with open dependencies",
                 repo=notif_ctx.repo_full_name,
@@ -352,81 +442,85 @@ async def _handle_notification(
                 gitea_username=deps.gitea_username,
                 open_dependencies=len(open_dependencies),
             )
-        else:
-            comments = await notif_ctx.get_subject_comments()
-            last_seen_comment_id = _latest_delivered_comment_id(
+            await _mark_notification_read(http, notif_ctx)
+            return
+
+        # Mark the thread read *before* reading its comments. A new comment
+        # that arrives after this PATCH creates a separate, still-unread
+        # notification that the next poll will pick up; if we waited until
+        # after ``get_comments`` instead, that new comment could be absorbed
+        # into the notification we are about to mark read and silently lost.
+        await _mark_notification_read(http, notif_ctx)
+
+        comments = await notif_ctx.get_subject_comments()
+        last_seen_comment_id = _latest_delivered_comment_id(
+            comments,
+            deps.gitea_username,
+        )
+        input_message, max_delivered_comment_id, has_mentioned_comments = (
+            _build_input_message(
+                notif_ctx,
                 comments,
+                last_seen_comment_id,
                 deps.gitea_username,
             )
-            input_message, max_delivered_comment_id, has_mentioned_comments = (
-                _build_input_message(
-                    notif_ctx,
-                    comments,
-                    last_seen_comment_id,
-                    deps.gitea_username,
-                )
+        )
+
+        if input_message is None:
+            logfire.info(
+                "skip notification unrelated to agent",
+                repo=notif_ctx.repo_full_name,
+                number=notif_ctx.number,
+                gitea_username=deps.gitea_username,
             )
+            return
 
-            if input_message is None:
-                logfire.info(
-                    "skip notification unrelated to agent",
-                    repo=notif_ctx.repo_full_name,
-                    number=notif_ctx.number,
-                    gitea_username=deps.gitea_username,
-                )
-                await _mark_notification_read(http, notif_ctx)
-                return
+        run_deps = replace(
+            deps,
+            notification_subject=NotificationSubject(
+                owner=notif_ctx.owner,
+                repo=notif_ctx.repo,
+                number=notif_ctx.number,
+                subject_type=notif_ctx.subject_type,
+            ),
+            has_mentioned_comments=has_mentioned_comments,
+        )
+        notif_subject = run_deps.notification_subject
+        assert notif_subject is not None  # we just set it above
 
-            run_deps = replace(
-                deps,
-                notification_subject=NotificationSubject(
-                    owner=notif_ctx.owner,
-                    repo=notif_ctx.repo,
-                    number=notif_ctx.number,
-                    subject_type=notif_ctx.subject_type,
-                ),
-                has_mentioned_comments=has_mentioned_comments,
+        # Load message history.
+        history: list[Any] = []
+        if run_deps.messages_dir is not None:
+            key = subject_message_key(
+                notif_subject.owner,
+                notif_subject.repo,
+                notif_subject.number,
             )
+            history = load_history(run_deps.messages_dir, key)
 
-            # Load message history.
-            history: list[Any] = []
-            if run_deps.messages_dir is not None:
-                key = subject_message_key(
-                    notif_ctx.owner,
-                    notif_ctx.repo,
-                    notif_ctx.number,
-                )
-                history = load_history(run_deps.messages_dir, key)
+        result = await _run_agent_iter(
+            agent,
+            input_message,
+            run_deps,
+            request_limit,
+            history,
+        )
 
-            result = await agent.run(
-                input_message,
-                deps=run_deps,
-                usage_limits=_agent_run_usage_limits(request_limit),
-                message_history=history or None,
+        # Post agent output as a comment with conversation marker.
+        comment_body = (
+            f"{marker_for(deps.gitea_username, max_delivered_comment_id)}"
+            f"\n\n{result.output}"
+        )
+        await http.post(
+            _SUBJECT_PATH_TEMPLATE.substitute(
+                owner=notif_subject.owner,
+                repo=notif_subject.repo,
+                path="issues",
+                number=notif_subject.number,
             )
-            logfire.info("agent output", output=result.output)
-
-            # Save message history.
-            if run_deps.messages_dir is not None:
-                save_history(run_deps.messages_dir, key, result.all_messages())
-
-            # Post agent output as a comment with conversation marker.
-            comment_body = (
-                f"{marker_for(deps.gitea_username, max_delivered_comment_id)}"
-                f"\n\n{result.output}"
-            )
-            await http.post(
-                _SUBJECT_PATH_TEMPLATE.substitute(
-                    owner=notif_ctx.owner,
-                    repo=notif_ctx.repo,
-                    path="issues",
-                    number=notif_ctx.number,
-                )
-                + "/comments",
-                json={"body": comment_body},
-            )
-
-        await _mark_notification_read(http, notif_ctx)
+            + "/comments",
+            json={"body": comment_body},
+        )
 
 
 async def poll_once(

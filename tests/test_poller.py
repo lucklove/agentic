@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from pydantic_ai._agent_graph import End
 
 from deps import AgentDeps
 from poller import (
@@ -48,8 +49,10 @@ class FakeHTTP:
         self.reviews = reviews or []
         self.patches: list[str] = []
         self.posts: list[tuple[str, dict[str, object]]] = []
+        self.gets: list[str] = []
 
     async def get(self, path: str, params: dict[str, str] | None = None) -> FakeResp:
+        self.gets.append(path)
         if path.endswith("/issues/31"):
             return FakeResp(self.subject)
         if path.endswith("/issues/31/comments"):
@@ -73,31 +76,75 @@ class FakeHTTP:
         return FakeResp({})
 
 
+class _FakeAgentRun:
+    """Stand-in for ``pydantic_ai.run.AgentRun`` for unit tests.
+
+    Mimics only the surface that ``poller._run_agent_iter`` touches:
+    ``next_node`` (always an :class:`End` so the loop body never executes),
+    ``result`` (a stub with ``output`` and ``all_messages``), and
+    ``all_messages`` (returns whatever list the test pre-loads). The
+    surrounding ``iter()`` is an async context manager wrapping this object
+    so ``async with agent.iter(...) as run`` is the entry point.
+    """
+
+    def __init__(
+        self,
+        output: str,
+        messages: list[object] | None = None,
+    ) -> None:
+        self._messages = list(messages or [])
+        self._result = SimpleNamespace(
+            output=output,
+            all_messages=lambda: list(self._messages),
+        )
+
+    @property
+    def next_node(self) -> End:
+        return End(None)
+
+    @property
+    def result(self) -> SimpleNamespace:
+        return self._result
+
+    def all_messages(self) -> list[object]:
+        return list(self._messages)
+
+
+class _FakeIterCM:
+    def __init__(self, run: _FakeAgentRun) -> None:
+        self._run = run
+
+    async def __aenter__(self) -> _FakeAgentRun:
+        return self._run
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        return None
+
+
 class PassingAgent:
-    def __init__(self) -> None:
+    def __init__(self, messages: list[object] | None = None) -> None:
         self.usage_limits: object | None = None
         self.run_deps: AgentDeps | None = None
         self.run_message: str | None = None
         self.run_history: object | None = None
+        self._messages = messages
 
-    async def run(
+    def iter(
         self,
         message: str,
+        *,
         deps: AgentDeps,
         usage_limits: object | None = None,
         message_history: object | None = None,
-    ) -> SimpleNamespace:
+    ) -> _FakeIterCM:
         self.usage_limits = usage_limits
         self.run_deps = deps
         self.run_message = message
         self.run_history = message_history
-        return SimpleNamespace(
-            output="done",
-            all_messages=lambda: [],
+        return _FakeIterCM(
+            _FakeAgentRun(output="done", messages=self._messages),
         )
 
-
-class FailingAgent:
     async def run(
         self,
         message: str,
@@ -105,7 +152,68 @@ class FailingAgent:
         usage_limits: object | None = None,
         message_history: object | None = None,
     ) -> SimpleNamespace:
-        raise RuntimeError("simulated underlying tool failure")
+        raise RuntimeError(
+            "PassingAgent only supports .iter(); use PassingAgent().iter(...)"
+        )
+
+
+class FailingAgent:
+    """Agent whose ``iter()`` raises before producing a result.
+
+    The exception is raised from ``__aenter__`` so ``poller._run_agent_iter``
+    cannot read partial messages — exercises the fallback path that saves
+    whatever history the caller passed in.
+    """
+
+    def __init__(self, messages: list[object] | None = None) -> None:
+        self._messages = list(messages or [])
+
+    def iter(
+        self,
+        message: str,
+        *,
+        deps: AgentDeps,
+        usage_limits: object | None = None,
+        message_history: object | None = None,
+    ) -> _FakeIterCM:
+        return _RaisingIterCM(
+            RuntimeError("simulated underlying tool failure"),
+            messages=self._messages,
+        )
+
+    async def run(
+        self,
+        message: str,
+        deps: AgentDeps,
+        usage_limits: object | None = None,
+        message_history: object | None = None,
+    ) -> SimpleNamespace:
+        raise RuntimeError(
+            "FailingAgent only supports .iter(); FailingAgent().iter(...)"
+        )
+
+
+class _RaisingAgentRun(_FakeAgentRun):
+    """AgentRun whose ``next_node`` raises — simulates a tool exploding mid-iter."""
+
+    def __init__(self, exc: BaseException, messages: list[object]) -> None:
+        super().__init__(output="", messages=messages)
+        self._exc = exc
+
+    @property
+    def next_node(self) -> object:
+        raise self._exc
+
+
+class _RaisingIterCM:
+    def __init__(self, exc: BaseException, messages: list[object]) -> None:
+        self._run = _RaisingAgentRun(exc, messages)
+
+    async def __aenter__(self) -> _FakeAgentRun:
+        return self._run
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        return None
 
 
 @pytest.fixture
@@ -138,16 +246,163 @@ def test_notification_span_name_includes_gitea_username() -> None:
     )
 
 
-def test_handle_notification_leaves_thread_unread_when_agent_fails(
+def test_handle_notification_marks_thread_read_before_getting_comments(
     deps: AgentDeps,
 ) -> None:
+    """Mark-read must happen **before** ``get_comments``.
+
+    Reasoning: a comment that arrives between ``get_comments`` and a later
+    mark-read PATCH could be silently absorbed into the notification we are
+    about to mark read, dropping it on the floor. By marking the thread read
+    first, any new comment creates a separate, still-unread notification
+    that the next poll picks up.
+
+    Concretely: the recorded HTTP call sequence must put the mark-read PATCH
+    in front of the comments GET.
+    """
+
+    async def run() -> None:
+        http = FakeHTTP()
+        agent = PassingAgent()
+
+        await _handle_notification(agent, http, notification(), deps)
+
+        assert http.patches == ["/api/v1/notifications/threads/123"]
+
+        first_get = next(
+            (path for path in http.gets if path.endswith("/comments")),
+            None,
+        )
+        assert first_get is not None, http.gets
+        # The mark-read PATCH must appear *before* the comments GET in the
+        # recorded HTTP call order. With mark-read at the end of the
+        # function, the comments GET would come first and this assertion
+        # would fail.
+        comments_idx = http.gets.index(first_get)
+        patches_idx = next(i for i, p in enumerate(http.patches) if p.endswith("/123"))
+        assert patches_idx < comments_idx, (
+            f"mark-read PATCH (patches[{patches_idx}]={http.patches[patches_idx]!r}) "
+            f"came after comments GET (gets[{comments_idx}]={first_get!r})"
+        )
+
+    asyncio.run(run())
+
+
+def test_handle_notification_marks_thread_read_before_agent_runs(
+    deps: AgentDeps,
+) -> None:
+    """The notification must also be marked read before ``agent.iter`` is
+    invoked: when the agent posts a reply comment, Gitea creates a new
+    notification on the same thread. If we waited to mark our current
+    notification read until *after* the run, the next poll cycle would still
+    see it, re-enter ``_handle_notification``, and the comment we just posted
+    would create yet another notification — agents would ping-pong forever.
+    """
+
+    class _OrderRecordingAgent:
+        def __init__(self) -> None:
+            self.patches_at_iter_call: int | None = None
+
+        def iter(
+            self,
+            message: str,
+            *,
+            deps: AgentDeps,
+            usage_limits: object | None = None,
+            message_history: object | None = None,
+        ) -> _FakeIterCM:
+            self.patches_at_iter_call = len(http.patches)
+            return _FakeIterCM(_FakeAgentRun(output="done"))
+
+        async def run(self, *args: object, **kwargs: object) -> object:
+            raise RuntimeError("only .iter() is supported")
+
+    async def run() -> None:
+        nonlocal http, agent  # type: ignore[misc]
+        http = FakeHTTP()
+        agent = _OrderRecordingAgent()
+
+        await _handle_notification(agent, http, notification(), deps)
+
+        assert agent.patches_at_iter_call == 1
+        assert http.patches == ["/api/v1/notifications/threads/123"]
+
+    http = None  # type: ignore[assignment]
+    agent = None  # type: ignore[assignment]
+    asyncio.run(run())
+
+
+def test_handle_notification_marks_thread_read_even_when_agent_fails(
+    deps: AgentDeps,
+) -> None:
+    """Mark-read happens before the run, so it persists even when the run
+    raises. The exception still propagates, but the notification is gone."""
+
     async def run() -> None:
         http = FakeHTTP()
 
         with pytest.raises(RuntimeError, match="simulated underlying tool failure"):
             await _handle_notification(FailingAgent(), http, notification(), deps)
 
-        assert http.patches == []
+        assert http.patches == ["/api/v1/notifications/threads/123"]
+
+    asyncio.run(run())
+
+
+def test_handle_notification_saves_partial_history_when_agent_fails(
+    tmp_path,
+) -> None:
+    """When ``agent.iter`` raises, ``close_pending_tool_calls`` runs and the
+    resulting history (with synthetic ``interrupted`` returns for any dangling
+    tool calls) is written to ``messages_dir/<key>.pkl``.
+    """
+    from pydantic_ai.messages import (
+        ModelRequest,
+        ModelResponse,
+        ToolCallPart,
+        ToolReturnPart,
+        UserPromptPart,
+    )
+
+    from conversation import load_history, subject_message_key
+
+    key = subject_message_key("autonomous", "agentic", "31")
+    prior_messages: list[object] = [
+        ModelRequest(parts=[UserPromptPart(content="hi")]),
+        ModelResponse(
+            parts=[ToolCallPart(tool_name="boom", args={}, tool_call_id="call-x")],
+        ),
+    ]
+
+    async def run() -> None:
+        deps = AgentDeps(
+            backend=object(),
+            gitea_username="code_agent",
+            gitea_base_url="http://gitea.example",
+            gitea_token="token",
+            messages_dir=tmp_path,
+        )
+        http = FakeHTTP()
+        agent = FailingAgent(messages=prior_messages)
+
+        with pytest.raises(RuntimeError, match="simulated underlying tool failure"):
+            await _handle_notification(agent, http, notification(), deps)
+
+        # Mark-read already happened before the run; the failure doesn't undo it.
+        assert http.patches == ["/api/v1/notifications/threads/123"]
+
+        saved = load_history(tmp_path, key)
+        # Original two messages preserved + synthetic closing request.
+        assert len(saved) == 3
+        assert isinstance(saved[0], ModelRequest)
+        assert isinstance(saved[1], ModelResponse)
+        assert isinstance(saved[2], ModelRequest)
+        closing = saved[2].parts
+        assert len(closing) == 1
+        assert isinstance(closing[0], ToolReturnPart)
+        assert closing[0].tool_call_id == "call-x"
+        assert closing[0].outcome == "interrupted"
+        assert "simulated underlying tool failure" in closing[0].content
 
     asyncio.run(run())
 

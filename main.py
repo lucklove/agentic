@@ -35,6 +35,7 @@ import json
 import os
 import socket
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import NamedTuple, TextIO
 
@@ -323,15 +324,9 @@ async def run_instruction(
                 runtime.deps,
                 attach,
             )
-            run_deps = AgentDeps(
-                backend=runtime.deps.backend,
-                gitea_username=runtime.deps.gitea_username,
-                gitea_base_url=runtime.deps.gitea_base_url,
-                gitea_token=runtime.deps.gitea_token,
-                http_client_factory=runtime.deps.http_client_factory,
+            run_deps = replace(
+                runtime.deps,
                 notification_subject=notification_subject,
-                profile_name=runtime.deps.profile_name,
-                messages_dir=runtime.deps.messages_dir,
             )
             history = loaded_history or None
             attached_key = subject_message_key(

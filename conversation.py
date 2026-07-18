@@ -17,10 +17,17 @@ import hashlib
 import logging
 import pickle
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    ToolCallPart,
+    ToolReturnPart,
+)
 
 __all__ = [
     "marker_for",
@@ -31,6 +38,7 @@ __all__ = [
     "subject_message_key",
     "load_history",
     "save_history",
+    "close_pending_tool_calls",
 ]
 
 _MARKER_TEMPLATE = (
@@ -143,3 +151,64 @@ def save_history(
     messages_dir.mkdir(parents=True, exist_ok=True)
     path = messages_dir / f"{key}.pkl"
     path.write_bytes(pickle.dumps(messages))
+
+
+def close_pending_tool_calls(
+    history: list[ModelMessage],
+    reason: str,
+    timestamp: datetime | None = None,
+) -> list[ModelMessage]:
+    """Append a synthetic ``ModelRequest`` that closes dangling tool calls.
+
+    Walks *history* for ``ToolCallPart`` entries that have no matching
+    ``ToolReturnPart`` (i.e. the previous run aborted before the tool
+    produced a result) and emits one ``ToolReturnPart(outcome='interrupted')``
+    per dangling call in a fresh ``ModelRequest`` appended to the end.
+
+    The returned list is the original *history* unchanged when nothing is
+    dangling, so callers can use the return value directly for
+    ``save_history`` and the next ``iter(message_history=...)`` without
+    triggering pydantic-ai's "Cannot provide a new user prompt when the
+    message history contains unprocessed tool calls" error.
+
+    Args:
+        history:   The accumulated message history captured before the
+                   exception escaped ``agent.iter``.
+        reason:    Human-readable description of why the previous run was
+                   interrupted; embedded in each synthetic return's content
+                   so the next model turn knows what happened.
+        timestamp: Optional explicit timestamp for the synthetic parts;
+                   defaults to ``datetime.now()``.
+    """
+    when = timestamp or datetime.now()
+    seen_call_ids: set[str] = set()
+    for message in history:
+        if isinstance(message, ModelRequest):
+            for part in message.parts:
+                if isinstance(part, ToolReturnPart):
+                    seen_call_ids.add(part.tool_call_id)
+
+    dangling: list[ToolCallPart] = []
+    for message in history:
+        if isinstance(message, ModelResponse):
+            for part in message.parts:  # type: ignore[assignment]
+                if not isinstance(part, ToolCallPart):
+                    continue
+                if part.tool_call_id in seen_call_ids:
+                    continue
+                dangling.append(part)
+
+    if not dangling:
+        return history
+
+    synth_parts = [
+        ToolReturnPart(
+            tool_name=part.tool_name,
+            content=f"previous run was interrupted before this tool returned; reason: {reason}",
+            tool_call_id=part.tool_call_id,
+            outcome="interrupted",
+            timestamp=when,
+        )
+        for part in dangling
+    ]
+    return [*history, ModelRequest(parts=synth_parts)]
