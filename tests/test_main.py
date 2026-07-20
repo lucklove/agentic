@@ -323,7 +323,7 @@ def test_run_instruction_attaches_history(
 
     class DummyAgent:
         def __init__(self) -> None:
-            self.calls: list[tuple[str, object, object]] = []
+            self.calls: list[tuple[str, object, object, object]] = []
 
         async def __aenter__(self) -> "DummyAgent":
             return self
@@ -331,8 +331,14 @@ def test_run_instruction_attaches_history(
         async def __aexit__(self, exc_type, exc, tb) -> None:
             return None
 
-        async def run(self, message: str, deps: object, message_history: object = None):
-            self.calls.append((message, deps, message_history))
+        async def run(
+            self,
+            message: str,
+            deps: object,
+            message_history: object = None,
+            usage_limits: object = None,
+        ):
+            self.calls.append((message, deps, message_history, usage_limits))
             return DummyResult()
 
     dummy_agent = DummyAgent()
@@ -346,6 +352,7 @@ def test_run_instruction_attaches_history(
             profile_name="demo",
             messages_dir=tmp_path,
         ),
+        request_limit=42,
     )
     subject = main.NotificationSubject(
         owner="autonomous",
@@ -388,10 +395,12 @@ def test_run_instruction_attaches_history(
     )
 
     assert len(dummy_agent.calls) == 1
-    message, deps, loaded_history = dummy_agent.calls[0]
+    message, deps, loaded_history, usage_limits = dummy_agent.calls[0]
     assert message == "hello"
     assert loaded_history == history
     assert deps.notification_subject == subject
+    assert usage_limits is not None
+    assert getattr(usage_limits, "request_limit") == 42
     assert save_calls == [
         (
             tmp_path,

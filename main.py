@@ -43,6 +43,7 @@ import httpx
 import logfire
 from pydantic_ai import Agent
 from pydantic_ai.messages import ModelMessage
+from pydantic_ai.usage import UsageLimits
 from pydantic_ai_backends import LocalBackend
 
 from agent_factory import make_agent
@@ -341,6 +342,7 @@ async def run_instruction(
                 instruction,
                 deps=run_deps,
                 message_history=history,
+                usage_limits=UsageLimits(request_limit=runtime.request_limit),
             )
             if run_deps.messages_dir is not None and attached_key is not None:
                 save_history(run_deps.messages_dir, attached_key, result.all_messages())
