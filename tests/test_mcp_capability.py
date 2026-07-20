@@ -186,8 +186,30 @@ def test_make_mcp_capability_missing_server_config() -> None:
 
 
 def test_make_mcp_capability_no_servers() -> None:
-    with pytest.raises(ValueError, match="no server entries"):
-        make_mcp_capability({})
+    """Empty opts returns a valid no-op capability instead of raising.
+
+    Regression test for issue #242: previously ``make_mcp_capability({})``
+    raised ``ValueError``, which blocked the standard global→profile override
+    idiom where a profile sets ``capabilities.mcp:`` (empty) to disable a
+    globally-configured ``capabilities.mcp``. The merged opts become empty
+    after the profile override, so the factory must accept that and return
+    a capability that simply exposes no MCP tools.
+    """
+    import asyncio
+
+    cap = make_mcp_capability({})
+
+    assert isinstance(cap, MCPServersCapability)
+    toolset = cap.get_toolset()
+    assert toolset is not None
+
+    # The toolset must be a usable empty CombinedToolset: opening it as an
+    # async context manager must succeed and it must expose no tools.
+    async def _empty() -> None:
+        async with toolset:
+            assert await toolset.get_tools(None) == {}
+
+    asyncio.run(_empty())
 
 
 def test_make_mcp_capability_url_auth_and_headers() -> None:

@@ -35,6 +35,11 @@ and compile from a cold/expired cache (see the rationale in
 per server via ``init_timeout`` in each server config; YAML may
 parse values as numbers or numeric strings, and a non-numeric
 value fails loudly with ``ValueError``.
+
+To override a globally-configured ``capabilities.mcp`` for one profile,
+write ``mcp:`` (empty) in that profile — the merge replaces the global
+servers with an empty set and ``make_mcp_capability`` returns a no-op
+capability that exposes no MCP tools. See issue #242.
 """
 
 from __future__ import annotations
@@ -63,7 +68,14 @@ class MCPServersCapability(AbstractCapability[Any]):
 
 
 def make_mcp_capability(opts: dict[str, Any]) -> MCPServersCapability:
-    """Factory used by the capability registry in ``agent_factory``."""
+    """Factory used by the capability registry in ``agent_factory``.
+
+    An empty ``opts`` (no server entries) returns a valid capability that
+    exposes no MCP tools. This is how a profile disables a globally
+    configured ``capabilities.mcp`` — writing ``mcp:`` (empty) in the
+    profile replaces the merged global servers with nothing instead of
+    raising. See issue #242.
+    """
     toolsets: list[AbstractToolset[Any]] = []
 
     for name, server_opts in opts.items():
@@ -127,7 +139,5 @@ def make_mcp_capability(opts: dict[str, Any]) -> MCPServersCapability:
 
         toolsets.append(toolset)
 
-    if not toolsets:
-        raise ValueError("`capabilities.mcp` contains no server entries")
-
+    # Empty opts is a valid no-op; see issue #242.
     return MCPServersCapability(_toolset=CombinedToolset(toolsets=toolsets))

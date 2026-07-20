@@ -464,3 +464,52 @@ def test_registry_builds_mcp_capability() -> None:
         registry["mcp"]({"server": {"command": "uv"}})
 
     mock_make.assert_called_once_with({"server": {"command": "uv"}})
+
+
+def test_make_agent_profile_empty_mcp_overrides_global() -> None:
+    """Profile can disable a globally-configured ``capabilities.mcp``.
+
+    Regression test for issue #242: writing ``mcp:`` (empty) in a profile
+    YAML must replace the merged global MCP servers with nothing instead of
+    raising ``ValueError("`capabilities.mcp` contains no server entries")``.
+    The constructed capability must be a valid ``MCPServersCapability`` that
+    simply exposes no MCP tools.
+    """
+    from agent_factory import make_agent
+    from capabilities.mcp_servers import MCPServersCapability
+
+    global_cfg = GlobalConfig(
+        gitea=GiteaGlobalConfig(base_url="http://gitea.example", mcp_command=[]),
+        capabilities={
+            "mcp": {
+                "global-server": {"command": "global-cmd"},
+            },
+        },
+    )
+    profile = ProfileConfig(
+        model="openai-responses:gpt-5.5",
+        model_settings={},
+        gitea=GiteaProfileConfig(token="token"),
+        instructions="test",
+        capabilities={"mcp": {}},
+    )
+
+    working_dir = Path(".")
+
+    built_caps: list = []
+
+    class _SpyAgent:
+        def __init__(self, *args, **kwargs):
+            built_caps.extend(kwargs.get("capabilities", []))
+
+    with patch("agent_factory.Agent", _SpyAgent), patch(
+        "agent_factory.build_model", return_value="model"
+    ):
+        make_agent(profile, global_cfg, working_dir, _deps())
+
+    # Exactly one MCP capability slot, built from the (now empty) merged
+    # opts. It must be a real MCPServersCapability — not None and not the
+    # raw ``make_mcp_capability({})`` exception bubbling out.
+    mcp_caps = [c for c in built_caps if isinstance(c, MCPServersCapability)]
+    assert len(mcp_caps) == 1
+    assert mcp_caps[0].get_toolset() is not None
