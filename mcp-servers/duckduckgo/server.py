@@ -8,31 +8,31 @@
 # ]
 # ///
 
-from mcp.server.fastmcp import FastMCP, Context
+import argparse
+import asyncio
+import ipaddress
+import logging
+import os
+import re
+import socket
+import urllib.parse
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import List, Optional
+
 import httpx
 from bs4 import BeautifulSoup
-from typing import List, Dict, Optional, Any
-from dataclasses import dataclass
+from mcp.server.fastmcp import Context, FastMCP
 from pydantic import BaseModel
-import urllib.parse
-import logging
-import sys
-import asyncio
-import argparse
-from datetime import datetime, timedelta
-import time
-import re
-import os
-import socket
-import ipaddress
-from enum import Enum
 
 
 class SafeSearchMode(Enum):
     """DuckDuckGo SafeSearch modes"""
-    STRICT = "1"      # kp=1: Strict filtering (most restrictive)
-    MODERATE = "-1"   # kp=-1: Moderate filtering (default)
-    OFF = "-2"        # kp=-2: No filtering
+
+    STRICT = "1"  # kp=1: Strict filtering (most restrictive)
+    MODERATE = "-1"  # kp=-1: Moderate filtering (default)
+    OFF = "-2"  # kp=-2: No filtering
 
 
 @dataclass
@@ -198,7 +198,9 @@ class DuckDuckGoSearcher:
                 "kp": self.safe_search.value,  # SafeSearch mode (fixed)
             }
 
-            await ctx.info(f"Searching DuckDuckGo for: {query} (SafeSearch: {self.safe_search.name}, Region: {effective_region or 'default'}, backend={self.backend})")
+            await ctx.info(
+                f"Searching DuckDuckGo for: {query} (SafeSearch: {self.safe_search.name}, Region: {effective_region or 'default'}, backend={self.backend})"
+            )
 
             try:
                 html = await self._request(data, ctx)
@@ -282,7 +284,9 @@ class DuckDuckGoSearcher:
         except httpx.HTTPStatusError as e:
             status = e.response.status_code if e.response is not None else None
             if status == 403:
-                await ctx.info("DuckDuckGo returned HTTP 403 to httpx; retrying with curl backend")
+                await ctx.info(
+                    "DuckDuckGo returned HTTP 403 to httpx; retrying with curl backend"
+                )
                 return await self._request_curl(data)
             raise
         except httpx.ConnectError as e:
@@ -501,7 +505,9 @@ class WebContentFetcher:
             current = url
             for _ in range(_MAX_REDIRECTS + 1):
                 await self._guard_url(current)
-                response = await client.get(current, allow_redirects=False, timeout=30.0)
+                response = await client.get(
+                    current, allow_redirects=False, timeout=30.0
+                )
                 location = response.headers.get("location")
                 if response.status_code in _REDIRECT_STATUSES and location:
                     current = urllib.parse.urljoin(current, location)
@@ -525,7 +531,9 @@ class WebContentFetcher:
             raise
 
         if _is_cloudflare_challenge_body(html):
-            await ctx.info(f"httpx got Cloudflare challenge for {url}; retrying with curl backend")
+            await ctx.info(
+                f"httpx got Cloudflare challenge for {url}; retrying with curl backend"
+            )
             return await self._fetch_curl(url)
 
         return html
@@ -558,7 +566,9 @@ class WebContentFetcher:
         try:
             await self.rate_limiter.acquire()
 
-            await ctx.info(f"Fetching content from: {url} (backend={effective_backend})")
+            await ctx.info(
+                f"Fetching content from: {url} (backend={effective_backend})"
+            )
 
             if effective_backend == "httpx":
                 html = await self._fetch_httpx(url)
@@ -588,7 +598,7 @@ class WebContentFetcher:
             total_length = len(text)
 
             # Apply pagination
-            text = text[start_index:start_index + max_length]
+            text = text[start_index : start_index + max_length]
             is_truncated = start_index + max_length < total_length
 
             # Add metadata
@@ -625,7 +635,9 @@ class WebContentFetcher:
             # curl path as a generic fetch error so we don't leak a stack trace
             # into the tool response.
             err_type = type(e).__name__
-            if "curl_cffi" in f"{type(e).__module__}" or err_type.lower().startswith(("curl", "timeout")):
+            if "curl_cffi" in f"{type(e).__module__}" or err_type.lower().startswith(
+                ("curl", "timeout")
+            ):
                 await ctx.error(f"curl fetch error for {url}: {err_type}: {str(e)}")
                 return f"Error: Could not access the webpage ({err_type}: {str(e)})"
             await ctx.error(f"Error fetching content from {url}: {str(e)}")
@@ -640,13 +652,18 @@ mcp = FastMCP("ddg-search", log_level="CRITICAL")
 for _name in ("httpx", "httpcore", "mcp.server.lowlevel", "mcp.server.session"):
     logging.getLogger(_name).setLevel(logging.CRITICAL)
 
+
 # Silence MCP log notifications that the client would otherwise echo as
 # `Received INFO from server: ...`. Keep .error / .log so genuine failures
 # still surface.
-async def _ctx_log_noop(self, *args, **kwargs): return None
+async def _ctx_log_noop(self, *args, **kwargs):
+    return None
+
+
 Context.debug = _ctx_log_noop
 Context.info = _ctx_log_noop
 Context.warning = _ctx_log_noop
+
 
 def _env_flag(name: str) -> bool:
     """True when the named env var is set to a truthy string (1/true/yes/on)."""
@@ -669,7 +686,9 @@ except KeyError:
 if SEARCH_BACKEND not in SUPPORTED_FETCH_BACKENDS:
     SEARCH_BACKEND = "auto"
 
-searcher = DuckDuckGoSearcher(safe_search=safe_search, default_region=REGION_CODE, backend=SEARCH_BACKEND)
+searcher = DuckDuckGoSearcher(
+    safe_search=safe_search, default_region=REGION_CODE, backend=SEARCH_BACKEND
+)
 fetcher = WebContentFetcher(allow_private_urls=ALLOW_PRIVATE_URLS)
 
 
@@ -699,7 +718,9 @@ async def search(
         results = await searcher.search(query, ctx, max_results, region)
         return DuckDuckSearchOutput(summary=searcher.format_results_for_llm(results))
     except Exception as e:
-        return DuckDuckSearchOutput(summary=f"An error occurred while searching: {str(e)}")
+        return DuckDuckSearchOutput(
+            summary=f"An error occurred while searching: {str(e)}"
+        )
 
 
 @mcp.tool()
@@ -721,16 +742,18 @@ async def fetch_content(
         backend: Optional override of the server's default fetch backend for this single call. One of 'httpx' (lightweight), 'curl' (Chrome TLS impersonation, bypasses many bot filters; requires the [browser] extra), or 'auto' (try httpx, fall back to curl on block). Leave unset to use the server default.
         ctx: MCP context for logging.
     """
-    text = await fetcher.fetch_and_parse(url, ctx, start_index, max_length, backend=backend)
+    text = await fetcher.fetch_and_parse(
+        url, ctx, start_index, max_length, backend=backend
+    )
     return DuckDuckContentOutput(content=text)
 
 
 def main():
     global fetcher, searcher
+    import uvicorn
     from starlette.applications import Starlette
     from starlette.middleware.cors import CORSMiddleware
     from starlette.routing import BaseRoute, Route
-    import uvicorn
 
     parser = argparse.ArgumentParser(description="DuckDuckGo MCP Server")
     parser.add_argument(
@@ -793,18 +816,24 @@ def main():
         parser.error("Cannot mix stdio with HTTP transports")
 
     if transports == {"stdio"} and (args.host is not None or args.port is not None):
-        parser.error("--host / --port are only valid with --transport sse or streamable-http")
+        parser.error(
+            "--host / --port are only valid with --transport sse or streamable-http"
+        )
 
     # Reconfigure the module-level fetcher with the chosen backend. Private-URL
     # access is enabled if either the env var or the CLI flag is set.
     allow_private = ALLOW_PRIVATE_URLS or args.allow_private_urls
-    fetcher = WebContentFetcher(backend=args.fetch_backend, allow_private_urls=allow_private)
+    fetcher = WebContentFetcher(
+        backend=args.fetch_backend, allow_private_urls=allow_private
+    )
 
     # Reconfigure the module-level searcher if a backend was given on the CLI
     # (otherwise it keeps the env-derived DDG_SEARCH_BACKEND default).
     if args.search_backend is not None:
         searcher = DuckDuckGoSearcher(
-            safe_search=safe_search, default_region=REGION_CODE, backend=args.search_backend
+            safe_search=safe_search,
+            default_region=REGION_CODE,
+            backend=args.search_backend,
         )
 
     if transports == {"stdio"}:
@@ -874,9 +903,7 @@ def main():
             f"Starting DuckDuckGo MCP Server with {' and '.join(transports)} transport"
         )
         if "sse" in transports:
-            print(
-                f"SSE endpoint: http://{host}:{port}{mcp.settings.sse_path}"
-            )
+            print(f"SSE endpoint: http://{host}:{port}{mcp.settings.sse_path}")
         if "streamable-http" in transports:
             print(
                 f"Streamable HTTP endpoint: http://{host}:{port}{mcp.settings.streamable_http_path}"
