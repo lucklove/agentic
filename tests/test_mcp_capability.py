@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -126,6 +127,7 @@ def test_make_mcp_capability_url() -> None:
         include_instructions=False,
         auth=None,
         headers=None,
+        init_timeout=30,
     )
     assert instance.prefixed_name == "weather-api"
 
@@ -211,6 +213,7 @@ def test_make_mcp_capability_url_auth_and_headers() -> None:
         include_instructions=False,
         auth="my-secret-token",
         headers={"X-Api-Version": "2025-01"},
+        init_timeout=30,
     )
 
 
@@ -241,3 +244,151 @@ def test_make_mcp_capability_multiple_servers_with_different_filters() -> None:
     assert filter_a(FakeDef("tool_b")) is False
     assert filter_b(FakeDef("tool_a")) is False
     assert filter_b(FakeDef("tool_b")) is True
+
+
+# ---------------------------------------------------------------------------
+# init_timeout — per-server override (issue #243)
+# ---------------------------------------------------------------------------
+
+
+def test_make_mcp_capability_default_init_timeout_stdio() -> None:
+    """stdio servers default to a 30s init_timeout (mirrors the Gitea capability)."""
+    with patch("capabilities.mcp_servers.MCPToolset") as MockToolset:
+        instance = FakeToolset("stdio-server")
+        instance.prefixed = _fake_prefixed.__get__(instance, FakeToolset)
+        instance.filtered = _fake_filtered.__get__(instance, FakeToolset)
+        MockToolset.return_value = instance
+
+        make_mcp_capability({"python-runner": {"command": "uv"}})
+
+    MockToolset.assert_called_once_with(
+        MockToolset.call_args.args[0],
+        include_instructions=True,
+        init_timeout=30,
+    )
+
+
+def test_make_mcp_capability_default_init_timeout_url() -> None:
+    """URL servers also default to a 30s init_timeout."""
+    with patch("capabilities.mcp_servers.MCPToolset") as MockToolset:
+        instance = FakeToolset("url-server")
+        instance.prefixed = _fake_prefixed.__get__(instance, FakeToolset)
+        instance.filtered = _fake_filtered.__get__(instance, FakeToolset)
+        MockToolset.return_value = instance
+
+        make_mcp_capability({"weather-api": {"url": "https://localhost:8080/sse"}})
+
+    MockToolset.assert_called_once_with(
+        "https://localhost:8080/sse",
+        include_instructions=True,
+        auth=None,
+        headers=None,
+        init_timeout=30,
+    )
+
+
+def test_make_mcp_capability_init_timeout_override_stdio() -> None:
+    """Profiles may override ``init_timeout`` per server on stdio transports."""
+    with patch("capabilities.mcp_servers.MCPToolset") as MockToolset:
+        instance = FakeToolset("stdio-server")
+        instance.prefixed = _fake_prefixed.__get__(instance, FakeToolset)
+        instance.filtered = _fake_filtered.__get__(instance, FakeToolset)
+        MockToolset.return_value = instance
+
+        make_mcp_capability(
+            {
+                "python-runner": {
+                    "command": "uv",
+                    "args": ["run", "server.py"],
+                    "init_timeout": 60,
+                }
+            }
+        )
+
+    assert MockToolset.call_args.kwargs["init_timeout"] == 60
+
+
+def test_make_mcp_capability_init_timeout_override_url() -> None:
+    """Profiles may override ``init_timeout`` per server on URL transports."""
+    with patch("capabilities.mcp_servers.MCPToolset") as MockToolset:
+        instance = FakeToolset("url-server")
+        instance.prefixed = _fake_prefixed.__get__(instance, FakeToolset)
+        instance.filtered = _fake_filtered.__get__(instance, FakeToolset)
+        MockToolset.return_value = instance
+
+        make_mcp_capability(
+            {
+                "weather-api": {
+                    "url": "https://localhost:8080/sse",
+                    "init_timeout": 10,
+                }
+            }
+        )
+
+    MockToolset.assert_called_once_with(
+        "https://localhost:8080/sse",
+        include_instructions=True,
+        auth=None,
+        headers=None,
+        init_timeout=10,
+    )
+
+
+def test_make_mcp_capability_init_timeout_accepts_numeric_string() -> None:
+    """YAML may parse values as numbers or numeric strings; coerce to float."""
+    with patch("capabilities.mcp_servers.MCPToolset") as MockToolset:
+        instance = FakeToolset("stdio-server")
+        instance.prefixed = _fake_prefixed.__get__(instance, FakeToolset)
+        instance.filtered = _fake_filtered.__get__(instance, FakeToolset)
+        MockToolset.return_value = instance
+
+        make_mcp_capability({"python-runner": {"command": "uv", "init_timeout": "45"}})
+
+    assert MockToolset.call_args.kwargs["init_timeout"] == 45.0
+
+
+def test_make_mcp_capability_rejects_non_numeric_init_timeout() -> None:
+    """A non-numeric init_timeout must fail loudly, not silently fall back."""
+    with patch("capabilities.mcp_servers.MCPToolset") as MockToolset:
+        instance = FakeToolset("stdio-server")
+        instance.prefixed = _fake_prefixed.__get__(instance, FakeToolset)
+        instance.filtered = _fake_filtered.__get__(instance, FakeToolset)
+        MockToolset.return_value = instance
+
+        with pytest.raises(ValueError):
+            make_mcp_capability(
+                {"python-runner": {"command": "uv", "init_timeout": "not-a-number"}}
+            )
+
+
+def test_make_mcp_capability_per_server_init_timeout_isolation() -> None:
+    """Each server in the same config may pick its own init_timeout.
+
+    Regression test: a closure-in-loop bug previously made every server
+    share the last server's value (fixed alongside the MCP filter bug).
+    """
+    with patch("capabilities.mcp_servers.MCPToolset") as MockToolset:
+        calls: list[dict[str, Any]] = []
+
+        def side_effect(client, *, include_instructions=True, **kwargs):
+            inst = FakeToolset(str(client))
+            inst._include_instructions = include_instructions
+            inst.prefixed = _fake_prefixed.__get__(inst, FakeToolset)
+            inst.filtered = _fake_filtered.__get__(inst, FakeToolset)
+            calls.append(kwargs)
+            return inst
+
+        MockToolset.side_effect = side_effect
+
+        make_mcp_capability(
+            {
+                "server-a": {"command": "cmd-a", "init_timeout": 12},
+                "server-b": {"url": "http://b", "init_timeout": 45},
+                "server-c": {"command": "cmd-c"},  # default 30
+            }
+        )
+
+    assert len(calls) == 3
+    assert calls[0]["init_timeout"] == 12
+    assert calls[1]["init_timeout"] == 45
+    assert calls[2]["init_timeout"] == 30

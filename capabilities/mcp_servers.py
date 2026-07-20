@@ -13,6 +13,7 @@ Profile YAML example::
           env:
             API_KEY: xxx
           include_instructions: true
+          init_timeout: 30            # seconds; default 30
           allow:
             - run_python
         weather-api:
@@ -21,9 +22,19 @@ Profile YAML example::
           headers:
             X-Api-Version: "2025-01"
           include_instructions: false
+          init_timeout: 10            # override per server
 
 Each server entry is turned into an ``MCPToolset`` wrapped with a
 name prefix to avoid tool-name collisions across servers.
+
+``init_timeout`` defaults to ``30`` seconds, the same headroom the
+Gitea MCP capability uses. The pydantic-ai default of 5 seconds is
+too short when the underlying stdio command has to resolve modules
+and compile from a cold/expired cache (see the rationale in
+``capabilities/gitea.py`` and issue #201). Profiles may override
+per server via ``init_timeout`` in each server config; YAML may
+parse values as numbers or numeric strings, and a non-numeric
+value fails loudly with ``ValueError``.
 """
 
 from __future__ import annotations
@@ -63,6 +74,14 @@ def make_mcp_capability(opts: dict[str, Any]) -> MCPServersCapability:
 
         include_instructions = server_opts.get("include_instructions", True)
 
+        # pydantic_ai's MCPToolset defaults to a 5-second init_timeout, which
+        # is too short when an stdio MCP server has to resolve modules and
+        # compile from a cold/expired cache (the Gitea MCP hit this in
+        # issue #201 with `go run gitea-mcp@latest`). Default to 30s — the
+        # same headroom the Gitea capability uses — and let profiles override
+        # per server via ``init_timeout`` in the YAML.
+        init_timeout: float = float(server_opts.get("init_timeout", 30))
+
         if "command" in server_opts:
             from fastmcp.client.transports import StdioTransport
 
@@ -75,6 +94,7 @@ def make_mcp_capability(opts: dict[str, Any]) -> MCPServersCapability:
             toolset: AbstractToolset[Any] = MCPToolset(
                 transport,
                 include_instructions=include_instructions,
+                init_timeout=init_timeout,
             )
         elif "url" in server_opts:
             toolset = MCPToolset(
@@ -82,6 +102,7 @@ def make_mcp_capability(opts: dict[str, Any]) -> MCPServersCapability:
                 include_instructions=include_instructions,
                 auth=server_opts.get("auth"),
                 headers=server_opts.get("headers"),
+                init_timeout=init_timeout,
             )
         else:
             raise ValueError(f"MCP server {name!r} must have either `command` or `url`")
