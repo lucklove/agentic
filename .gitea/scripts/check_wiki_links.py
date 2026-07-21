@@ -23,15 +23,15 @@ Usage:
 
 Examples:
     # Check the agentic wiki from its root:
-    uv run check_wiki_links.py http://gitea.ai/autonomous/agentic/wiki
+    uv run check_wiki_links.py http://gitea.ai/agentic/agentic/wiki
 
     # Check just one skill page (and any wiki page it links to):
     uv run check_wiki_links.py \
-        http://gitea.ai/autonomous/agentic/wiki/Issue-Triage \
+        http://gitea.ai/agentic/agentic/wiki/Issue-Triage \
         --max-depth 2
 
     # Only audit wiki-internal links, skip HEAD-checks of external links:
-    uv run check_wiki_links.py http://gitea.ai/autonomous/agentic/wiki \
+    uv run check_wiki_links.py http://gitea.ai/agentic/agentic/wiki \
         --no-external
 """
 
@@ -610,7 +610,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Wiki URL to start crawling from. Any wiki page works; the "
             "crawler follows /wiki/ links on the same host. Example: "
-            "http://gitea.ai/autonomous/agentic/wiki/Issue-Triage"
+            "http://gitea.ai/agentic/agentic/wiki/Issue-Triage"
         ),
     )
     p.add_argument(

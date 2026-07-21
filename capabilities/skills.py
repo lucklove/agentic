@@ -7,8 +7,8 @@ Profile YAML example::
 
     capabilities:
       skills:
-        - http://gitea.ai/autonomous/agentic/wiki/Skills/Issue-Triage.-
-        - http://gitea.ai/autonomous/agentic/wiki/Skills/Writing-Plans.-
+        - http://gitea.ai/agentic/agentic/wiki/Issue-Triage
+        - http://gitea.ai/agentic/agentic/wiki/Writing-Plans
 
 Validation policy
 -----------------
@@ -198,7 +198,7 @@ def parse_wiki_url(url: str) -> tuple[str, str, str]:
 
     Args:
         url: Full URL of a Gitea wiki page
-            (e.g. ``http://gitea.ai/autonomous/agentic/wiki/Skills/Issue-Triage.-``).
+            (e.g. ``http://gitea.ai/agentic/agentic/wiki/Issue-Triage``).
 
     Returns:
         ``(owner, repo, page_name)`` tuple.

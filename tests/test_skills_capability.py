@@ -22,47 +22,42 @@ from capabilities.skills import (
 
 def test_parse_wiki_url_simple_page() -> None:
     owner, repo, page = parse_wiki_url(
-        "http://gitea.ai/autonomous/agentic/wiki/Issue-Triage"
+        "http://gitea.ai/agentic/agentic/wiki/Issue-Triage"
     )
-    assert (owner, repo, page) == ("autonomous", "agentic", "Issue-Triage")
+    assert (owner, repo, page) == ("agentic", "agentic", "Issue-Triage")
 
 
-def test_parse_wiki_url_sub_page_preserves_slashes() -> None:
+def test_parse_wiki_url_accepts_hyphenated_page() -> None:
     owner, repo, page = parse_wiki_url(
-        "http://gitea.ai/autonomous/agentic/wiki/Skills/Issue-Triage/References/Foo"
+        "http://gitea.ai/agentic/agentic/wiki/Agentic-Skill-Authoring-Checklist"
     )
     assert (owner, repo, page) == (
-        "autonomous",
         "agentic",
-        "Skills/Issue-Triage/References/Foo",
+        "agentic",
+        "Agentic-Skill-Authoring-Checklist",
     )
 
 
-def test_parse_wiki_url_preserves_gitea_suffix() -> None:
-    """Gitea appends a `.-` suffix to slashes in page names; we keep it."""
+def test_parse_wiki_url_preserves_page_name() -> None:
     owner, repo, page = parse_wiki_url(
-        "http://gitea.ai/autonomous/agentic/wiki/Skills/Issue-Triage.-"
+        "http://gitea.ai/agentic/agentic/wiki/Writing-Plans"
     )
-    assert (owner, repo, page) == (
-        "autonomous",
-        "agentic",
-        "Skills/Issue-Triage.-",
-    )
+    assert (owner, repo, page) == ("agentic", "agentic", "Writing-Plans")
 
 
 def test_parse_wiki_url_strips_trailing_slashes() -> None:
     owner, repo, page = parse_wiki_url(
-        "http://gitea.ai/autonomous/agentic/wiki/Issue-Triage/"
+        "http://gitea.ai/agentic/agentic/wiki/Issue-Triage/"
     )
-    assert (owner, repo, page) == ("autonomous", "agentic", "Issue-Triage")
+    assert (owner, repo, page) == ("agentic", "agentic", "Issue-Triage")
 
 
 @pytest.mark.parametrize(
     "url",
     [
-        "http://gitea.ai/autonomous/agentic",  # no /wiki/
-        "http://gitea.ai/autonomous/agentic/wiki",  # no page
-        "http://gitea.ai/autonomous/agentic/wiki/",  # no page (trailing slash)
+        "http://gitea.ai/agentic/agentic",  # no /wiki/
+        "http://gitea.ai/agentic/agentic/wiki",  # no page
+        "http://gitea.ai/agentic/agentic/wiki/",  # no page (trailing slash)
         "not a url at all",
     ],
 )
@@ -203,12 +198,8 @@ def test_make_skills_capability_returns_empty_for_empty_list() -> None:
 def test_make_skills_capability_passes_through_urls_and_validation() -> None:
     """Happy path: each URL is fetched, frontmatter parsed, name/desc extracted."""
     page_bodies = {
-        # The capability URL-encodes `/` in the page name as %2F when calling
-        # the Gitea REST API. Keys include the `/page/` segment that the
-        # live Gitea endpoint uses (GET /wiki/page/{page}, not /wiki/{page}),
-        # so the fake matches against the real URL shape.
-        "autonomous/agentic/wiki/page/Skills%2FFoo.-": "---\nname: foo\ndescription: Foo skill.\n---\nbody",
-        "autonomous/agentic/wiki/page/Skills%2FBar.-": "---\nname: bar\ndescription: |\n  Bar skill.\n  Spans two lines.\n---\nbody",
+        "agentic/agentic/wiki/page/Issue-Triage": "---\nname: issue-triage\ndescription: Issue triage skill.\n---\nbody",
+        "agentic/agentic/wiki/page/Writing-Plans": "---\nname: writing-plans\ndescription: Writing plans skill.\n---\nbody",
     }
 
     captured_urls: list[str] = []
@@ -231,25 +222,25 @@ def test_make_skills_capability_passes_through_urls_and_validation() -> None:
     with patch("capabilities.skills.httpx.get", side_effect=fake_get):
         capability = make_skills_capability(
             urls=[
-                "http://gitea.example/autonomous/agentic/wiki/Skills/Foo.-",
-                "http://gitea.example/autonomous/agentic/wiki/Skills/Bar.-",
+                "http://gitea.example/agentic/agentic/wiki/Issue-Triage",
+                "http://gitea.example/agentic/agentic/wiki/Writing-Plans",
             ],
             base_url="http://gitea.example",
             token="t",
         )
 
     names = [s.name for s in capability.skills]
-    assert names == ["foo", "bar"]
-    assert capability.skills[0].description == "Foo skill."
-    assert "Spans two lines." in capability.skills[1].description
+    assert names == ["issue-triage", "writing-plans"]
+    assert capability.skills[0].description == "Issue triage skill."
+    assert "Writing plans skill." in capability.skills[1].description
     # Lock in the Gitea wiki endpoint contract: GET /wiki/page/{page},
     # not /wiki/{page}. Sub-page slashes are URL-encoded as %2F.
     assert (
-        "http://gitea.example/api/v1/repos/autonomous/agentic/wiki/page/Skills%2FFoo.-"
+        "http://gitea.example/api/v1/repos/agentic/agentic/wiki/page/Issue-Triage"
         in captured_urls
     )
     assert (
-        "http://gitea.example/api/v1/repos/autonomous/agentic/wiki/page/Skills%2FBar.-"
+        "http://gitea.example/api/v1/repos/agentic/agentic/wiki/page/Writing-Plans"
         in captured_urls
     )
     assert "/wiki/page/" in captured_urls[0]  # explicit /page/ segment check
@@ -263,7 +254,7 @@ def test_make_skills_capability_raises_on_missing_page() -> None:
         with pytest.raises(RuntimeError, match="wiki page not found"):
             make_skills_capability(
                 urls=[
-                    "http://gitea.example/owner/repo/wiki/Missing.-",
+                    "http://gitea.example/owner/repo/wiki/Missing-Page",
                 ],
                 base_url="http://gitea.example",
                 token="t",
@@ -424,7 +415,7 @@ def test_before_tool_execute_rewrites_dashes_in_wiki_read_page_name() -> None:
     tool_def = SimpleNamespace(name="gitea_wiki_read")
     args = {
         "method": "get",
-        "owner": "autonomous",
+        "owner": "agentic",
         "repo": "agentic",
         "pageName": "Issue-Triage",
     }
@@ -441,7 +432,7 @@ def test_before_tool_execute_rewrites_dashes_in_wiki_read_page_name() -> None:
     assert new_args["pageName"] == "Issue Triage"
     # Other keys must survive untouched.
     assert new_args["method"] == "get"
-    assert new_args["owner"] == "autonomous"
+    assert new_args["owner"] == "agentic"
     assert new_args["repo"] == "agentic"
     # The original args dict must not be mutated in place; otherwise
     # downstream handlers / logging would observe an unexpected rewrite.
@@ -454,7 +445,7 @@ def test_before_tool_execute_rewrites_dashes_in_wiki_write_page_name() -> None:
     tool_def = SimpleNamespace(name="gitea_wiki_write")
     args = {
         "method": "create",
-        "owner": "autonomous",
+        "owner": "agentic",
         "repo": "agentic",
         "title": "Issue Triage",
         "pageName": "Issue-Triage",
@@ -500,7 +491,7 @@ def test_before_tool_execute_passes_through_already_spaced_page_name() -> None:
     tool_def = SimpleNamespace(name="gitea_wiki_read")
     args = {
         "method": "get",
-        "owner": "autonomous",
+        "owner": "agentic",
         "repo": "agentic",
         "pageName": "Issue Triage",
     }
@@ -526,7 +517,7 @@ def test_before_tool_execute_ignores_other_tools() -> None:
     tool_def = SimpleNamespace(name="gitea_issue_write")
     args = {
         "method": "create",
-        "owner": "autonomous",
+        "owner": "agentic",
         "repo": "agentic",
         "title": "Has-Dashes-In-Title",
     }
@@ -548,7 +539,7 @@ def test_before_tool_execute_ignores_wiki_list_method_without_page_name() -> Non
     """``gitea_wiki_read(method="list")`` has no ``pageName`` — pass through."""
     capability = WikiSkillCapability(skills=[])
     tool_def = SimpleNamespace(name="gitea_wiki_read")
-    args = {"method": "list", "owner": "autonomous", "repo": "agentic"}
+    args = {"method": "list", "owner": "agentic", "repo": "agentic"}
 
     new_args = asyncio.run(
         capability.before_tool_execute(
@@ -566,7 +557,7 @@ def test_before_tool_execute_handles_missing_page_name() -> None:
     """If the call has no ``pageName`` key at all, pass through unchanged."""
     capability = WikiSkillCapability(skills=[])
     tool_def = SimpleNamespace(name="gitea_wiki_read")
-    args = {"method": "get", "owner": "autonomous", "repo": "agentic"}
+    args = {"method": "get", "owner": "agentic", "repo": "agentic"}
 
     new_args = asyncio.run(
         capability.before_tool_execute(
@@ -603,7 +594,7 @@ def test_before_tool_execute_preserves_subpage_dot_dash_suffix() -> None:
     """Sub-page skill slugs end in ``.-``; rewriting it would 404 the request.
 
     Regression test for review feedback on PR #220: a configured skill URL
-    like ``http://gitea.ai/autonomous/agentic/wiki/Skills/Issue-Triage.-``
+    like ``http://gitea.ai/agentic/agentic/wiki/Issue-Triage``
     (the format the capability itself documents in its module docstring
     and that :func:`parse_wiki_url` returns verbatim) carries the Gitea
     sub-page slug with a ``.-`` suffix. The MCP ``pageName`` parameter
@@ -616,7 +607,7 @@ def test_before_tool_execute_preserves_subpage_dot_dash_suffix() -> None:
     tool_def = SimpleNamespace(name="gitea_wiki_read")
     args = {
         "method": "get",
-        "owner": "autonomous",
+        "owner": "agentic",
         "repo": "agentic",
         "pageName": "Skills/Issue-Triage.-",
     }

@@ -19,7 +19,7 @@ name: Wiki link check
         description: "Wiki page URL to start crawling from (any wiki page works)"
         type: string
         required: true
-        default: "http://gitea.ai/autonomous/agentic/wiki"
+        default: "http://gitea.ai/agentic/agentic/wiki"
       max_depth:
         description: "Maximum link-follow depth for the wiki crawl"
         type: string

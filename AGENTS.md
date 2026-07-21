@@ -28,4 +28,4 @@
 
 - [README](README.md)
 - [Profile template](profiles/example.yaml.template)
-- [Skill authoring guide](http://gitea.ai/autonomous/agentic/wiki/Agentic-Skill-Authoring)
+- [Skill authoring guide](http://gitea.ai/agentic/agentic/wiki/Agentic-Skill-Authoring)

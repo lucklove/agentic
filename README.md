@@ -8,7 +8,7 @@ Gitea-notification-driven agent runner. Each profile in `~/.agentic/<profile>/pr
 uv run main.py                                        # poll every ~/.agentic/*/profile.yaml
 uv run main.py <profile-name> [<profile-name> ...]  # poll one or more profiles concurrently
 uv run main.py <profile-name> -i "instruction"      # run one profile once, print model output, do not poll
-uv run main.py <profile-name> -i "instruction" -a autonomous/agentic/issues/160
+uv run main.py <profile-name> -i "instruction" -a agentic/agentic/issues/160
                                                 # attach the one-shot run to an existing issue/PR and load saved history
 uv run main.py --config /path/to/agentic.yaml       # override the global config file path
 uv run main.py --profiles-root /path/to/profiles    # override the root containing named profile subdirectories
@@ -69,8 +69,8 @@ Skills are reusable workflows the agent can opt into. The list is declared as a 
 ```yaml
 capabilities:
   skills:
-    - http://gitea.ai/autonomous/agentic/wiki/Issue-Triage
-    - http://gitea.ai/autonomous/agentic/wiki/Writing-Plans
+    - http://gitea.ai/agentic/agentic/wiki/Issue-Triage
+    - http://gitea.ai/agentic/agentic/wiki/Writing-Plans
 ```
 
 Each wiki page must start with a YAML frontmatter block that defines `name` and `description`:
@@ -95,7 +95,7 @@ At startup the capability injects a small YAML index of `{name, url, description
 
 Profile `capabilities.skills` replaces the global value entirely (the same replace-not-merge rule that applies to all other capabilities). An empty / unset list means no skills and no prompt injection.
 
-To author a new skill or migrate an existing one, see the [Agentic Skill Authoring](http://gitea.ai/autonomous/agentic/wiki/Agentic-Skill-Authoring) wiki page in the `autonomous/agentic` repo.
+To author a new skill or migrate an existing one, see the [Agentic Skill Authoring](http://gitea.ai/agentic/agentic/wiki/Agentic-Skill-Authoring) wiki page in the `agentic/agentic` repo.
 
 ## Notes
 

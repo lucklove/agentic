@@ -157,8 +157,8 @@ class DummyResponse:
 
 
 def test_parse_attach_target_accepts_issue_path() -> None:
-    assert main._parse_attach_target("autonomous/agentic/issues/160") == (
-        "autonomous",
+    assert main._parse_attach_target("agentic/agentic/issues/160") == (
+        "agentic",
         "agentic",
         "Issue",
         "160",
@@ -166,8 +166,8 @@ def test_parse_attach_target_accepts_issue_path() -> None:
 
 
 def test_parse_attach_target_accepts_pull_url() -> None:
-    assert main._parse_attach_target("http://gitea.ai/autonomous/agentic/pulls/99") == (
-        "autonomous",
+    assert main._parse_attach_target("http://gitea.ai/agentic/agentic/pulls/99") == (
+        "agentic",
         "agentic",
         "Pull",
         "99",
@@ -176,14 +176,14 @@ def test_parse_attach_target_accepts_pull_url() -> None:
 
 def test_parse_attach_target_rejects_invalid_target() -> None:
     with pytest.raises(ValueError, match="attach target must look like"):
-        main._parse_attach_target("autonomous/agentic/160")
+        main._parse_attach_target("agentic/agentic/160")
 
 
 def test_load_attach_history_loads_existing_thread_history(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    key = main.subject_message_key("autonomous", "agentic", "160")
+    key = main.subject_message_key("agentic", "agentic", "160")
     expected_history = [SimpleNamespace(kind="message")]
     load_calls: list[tuple[Path, str]] = []
     client = DummyClient(DummyResponse())
@@ -208,15 +208,15 @@ def test_load_attach_history_loads_existing_thread_history(
     )
 
     subject, history = main.asyncio.run(
-        main._load_attach_history(deps, "autonomous/agentic/issues/160")
+        main._load_attach_history(deps, "agentic/agentic/issues/160")
     )
 
-    assert subject.owner == "autonomous"
+    assert subject.owner == "agentic"
     assert subject.repo == "agentic"
     assert subject.number == "160"
     assert subject.subject_type == "Issue"
     assert history == expected_history
-    assert client.requested_paths == ["/api/v1/repos/autonomous/agentic/issues/160"]
+    assert client.requested_paths == ["/api/v1/repos/agentic/agentic/issues/160"]
     assert load_calls == [(tmp_path, key)]
 
 
@@ -236,12 +236,12 @@ def test_load_attach_history_allows_closed_or_merged_subjects(
     )
 
     subject, history = main.asyncio.run(
-        main._load_attach_history(deps, "autonomous/agentic/pulls/160")
+        main._load_attach_history(deps, "agentic/agentic/pulls/160")
     )
 
     assert subject.subject_type == "Pull"
     assert history == []
-    assert client.requested_paths == ["/api/v1/repos/autonomous/agentic/pulls/160"]
+    assert client.requested_paths == ["/api/v1/repos/agentic/agentic/pulls/160"]
 
 
 def test_load_attach_history_propagates_missing_subject(
@@ -249,7 +249,7 @@ def test_load_attach_history_propagates_missing_subject(
 ) -> None:
     request = httpx.Request(
         "GET",
-        "http://gitea.example/api/v1/repos/autonomous/agentic/issues/404",
+        "http://gitea.example/api/v1/repos/agentic/agentic/issues/404",
     )
     response = httpx.Response(404, request=request)
     client = DummyClient(
@@ -269,9 +269,7 @@ def test_load_attach_history_propagates_missing_subject(
     )
 
     with pytest.raises(httpx.HTTPStatusError):
-        main.asyncio.run(
-            main._load_attach_history(deps, "autonomous/agentic/issues/404")
-        )
+        main.asyncio.run(main._load_attach_history(deps, "agentic/agentic/issues/404"))
 
 
 def test_main_rejects_attach_without_instruction(tmp_path: Path) -> None:
@@ -297,7 +295,7 @@ instructions: test
             "main.py",
             "demo",
             "--attach",
-            "autonomous/agentic/issues/160",
+            "agentic/agentic/issues/160",
             "--config",
             str(config_path),
             "--profiles-root",
@@ -355,7 +353,7 @@ def test_run_instruction_attaches_history(
         request_limit=42,
     )
     subject = main.NotificationSubject(
-        owner="autonomous",
+        owner="agentic",
         repo="agentic",
         number="160",
         subject_type="Issue",
@@ -390,7 +388,7 @@ def test_run_instruction_attaches_history(
             "hello",
             tmp_path / "agentic.yaml",
             tmp_path,
-            attach="autonomous/agentic/issues/160",
+            attach="agentic/agentic/issues/160",
         )
     )
 
@@ -404,7 +402,7 @@ def test_run_instruction_attaches_history(
     assert save_calls == [
         (
             tmp_path,
-            main.subject_message_key("autonomous", "agentic", "160"),
+            main.subject_message_key("agentic", "agentic", "160"),
             saved_messages,
         )
     ]

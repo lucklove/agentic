@@ -230,10 +230,10 @@ def notification(subject_type: str = "Issue") -> dict[str, object]:
     path = "pulls" if subject_type == "Pull" else "issues"
     return {
         "id": 123,
-        "repository": {"full_name": "autonomous/agentic"},
+        "repository": {"full_name": "agentic/agentic"},
         "subject": {
             "type": subject_type,
-            "url": f"http://gitea.example/api/v1/repos/autonomous/agentic/{path}/31",
+            "url": f"http://gitea.example/api/v1/repos/agentic/agentic/{path}/31",
             "title": "bug",
         },
     }
@@ -241,8 +241,8 @@ def notification(subject_type: str = "Issue") -> dict[str, object]:
 
 def test_notification_span_name_includes_gitea_username() -> None:
     assert (
-        _notification_span_name("autonomous/agentic", "31", "code_agent")
-        == "notification autonomous/agentic#31 (code_agent)"
+        _notification_span_name("agentic/agentic", "31", "code_agent")
+        == "notification agentic/agentic#31 (code_agent)"
     )
 
 
@@ -381,7 +381,7 @@ def test_handle_notification_saves_partial_history_when_agent_fails(
 
     from conversation import load_history, subject_message_key
 
-    key = subject_message_key("autonomous", "agentic", "31")
+    key = subject_message_key("agentic", "agentic", "31")
     prior_messages: list[object] = [
         ModelRequest(parts=[UserPromptPart(content="hi")]),
         ModelResponse(
@@ -537,7 +537,7 @@ def test_handle_notification_marks_thread_read_after_success(
         assert getattr(agent.usage_limits, "request_limit") == 42
         assert agent.run_deps is not None
         assert agent.run_deps.notification_subject is not None
-        assert agent.run_deps.notification_subject.owner == "autonomous"
+        assert agent.run_deps.notification_subject.owner == "agentic"
         assert agent.run_deps.notification_subject.repo == "agentic"
         assert agent.run_deps.notification_subject.number == "31"
         assert agent.run_deps.notification_subject.subject_type == "Issue"
@@ -703,9 +703,7 @@ def test_handle_notification_uses_unseen_mention_not_last_comment(
 
         assert agent.run_deps is not None
         assert agent.run_message is not None
-        assert (
-            "Someone mentioned you in autonomous/agentic issue #31" in agent.run_message
-        )
+        assert "Someone mentioned you in agentic/agentic issue #31" in agent.run_message
         assert "======== comment id: 2, from @human ========" in agent.run_message
         assert "Please take a look @code_agent" in agent.run_message
 
@@ -1238,7 +1236,7 @@ def test_handle_notification_merges_chat_then_mentions_into_one_message(
         assert agent.run_message == (
             "chat 1\n\n"
             "chat 2 @code_agent\n\n"
-            "Someone mentioned you in autonomous/agentic issue #31\n\n"
+            "Someone mentioned you in agentic/agentic issue #31\n\n"
             "You have the right (but not the obligation) to reply via gitea_issue_write.\n\n"
             "======== comment id: 3, from @agent_a ========\n\n"
             "Please handle this @code_agent\n\n"
@@ -1280,7 +1278,7 @@ def test_handle_notification_chat_comment_with_mention_is_not_duplicated(
         assert agent.run_message == "please continue @code_agent"
         assert agent.run_message.count("please continue @code_agent") == 1
         assert (
-            "Someone mentioned you in autonomous/agentic issue #31"
+            "Someone mentioned you in agentic/agentic issue #31"
             not in agent.run_message
         )
         assert http.posts[0][1]["body"].startswith(
@@ -1316,7 +1314,7 @@ def test_handle_notification_formats_pull_mentions_as_pr(
         await _handle_notification(agent, http, notification("Pull"), deps)
 
         assert agent.run_message is not None
-        assert "Someone mentioned you in autonomous/agentic PR #31" in agent.run_message
+        assert "Someone mentioned you in agentic/agentic PR #31" in agent.run_message
 
     asyncio.run(run())
 

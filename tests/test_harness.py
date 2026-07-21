@@ -19,7 +19,7 @@ def deps() -> AgentDeps:
         gitea_base_url="http://gitea.example",
         gitea_token="token",
         notification_subject=NotificationSubject(
-            owner="autonomous",
+            owner="agentic",
             repo="agentic",
             number="31",
             subject_type="Issue",
@@ -39,7 +39,7 @@ def test_before_tool_execute_passes_through_non_comment_tool(deps: AgentDeps) ->
     cap = HarnessCapability()
     ctx = SimpleNamespace(deps=deps)
     tool_def = SimpleNamespace(name="gitea_pull_request_write")
-    args = {"method": "add_reviewers", "owner": "autonomous", "repo": "agentic"}
+    args = {"method": "add_reviewers", "owner": "agentic", "repo": "agentic"}
 
     output = asyncio.run(
         cap.before_tool_execute(
@@ -162,7 +162,7 @@ def test_before_tool_execute_allows_other_pull_request_methods(deps: AgentDeps) 
     cap = HarnessCapability()
     ctx = SimpleNamespace(deps=deps)
     tool_def = SimpleNamespace(name="gitea_pull_request_write")
-    args = {"method": "merge", "owner": "autonomous", "repo": "agentic"}
+    args = {"method": "merge", "owner": "agentic", "repo": "agentic"}
 
     output = asyncio.run(
         cap.before_tool_execute(
@@ -185,7 +185,7 @@ def test_after_tool_execute_filters_conversation_comments() -> None:
             gitea_base_url="http://gitea.example",
             gitea_token="token",
             notification_subject=NotificationSubject(
-                owner="autonomous",
+                owner="agentic",
                 repo="agentic",
                 number="31",
                 subject_type="Issue",
@@ -195,7 +195,7 @@ def test_after_tool_execute_filters_conversation_comments() -> None:
     tool_def = SimpleNamespace(name="gitea_issue_read")
     args = {
         "method": "get_comments",
-        "owner": "autonomous",
+        "owner": "agentic",
         "repo": "agentic",
         "issue_number": 31,
     }
@@ -275,7 +275,7 @@ def test_after_tool_execute_preserves_different_agent_marker() -> None:
             gitea_base_url="http://gitea.example",
             gitea_token="token",
             notification_subject=NotificationSubject(
-                owner="autonomous",
+                owner="agentic",
                 repo="agentic",
                 number="31",
                 subject_type="Issue",
@@ -285,7 +285,7 @@ def test_after_tool_execute_preserves_different_agent_marker() -> None:
     tool_def = SimpleNamespace(name="gitea_issue_read")
     args = {
         "method": "get_comments",
-        "owner": "autonomous",
+        "owner": "agentic",
         "repo": "agentic",
         "issue_number": 31,
     }
@@ -319,7 +319,7 @@ def test_after_tool_execute_skips_filter_when_no_notification_subject() -> None:
     tool_def = SimpleNamespace(name="gitea_issue_read")
     args = {
         "method": "get_comments",
-        "owner": "autonomous",
+        "owner": "agentic",
         "repo": "agentic",
         "issue_number": 31,
     }
@@ -350,7 +350,7 @@ def test_after_tool_execute_skips_filter_for_different_issue() -> None:
             gitea_base_url="http://gitea.example",
             gitea_token="token",
             notification_subject=NotificationSubject(
-                owner="autonomous",
+                owner="agentic",
                 repo="agentic",
                 number="31",
                 subject_type="Issue",
@@ -360,7 +360,7 @@ def test_after_tool_execute_skips_filter_for_different_issue() -> None:
     tool_def = SimpleNamespace(name="gitea_issue_read")
     args = {
         "method": "get_comments",
-        "owner": "autonomous",
+        "owner": "agentic",
         "repo": "agentic",
         "issue_number": 200,
     }
@@ -392,7 +392,7 @@ def test_after_tool_execute_skips_filter_for_different_repo() -> None:
             gitea_base_url="http://gitea.example",
             gitea_token="token",
             notification_subject=NotificationSubject(
-                owner="autonomous",
+                owner="agentic",
                 repo="agentic",
                 number="31",
                 subject_type="Issue",
@@ -402,7 +402,7 @@ def test_after_tool_execute_skips_filter_for_different_repo() -> None:
     tool_def = SimpleNamespace(name="gitea_issue_read")
     args = {
         "method": "get_comments",
-        "owner": "autonomous",
+        "owner": "agentic",
         "repo": "other-repo",
         "issue_number": 31,
     }

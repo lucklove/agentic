@@ -360,11 +360,11 @@ def test_registry_builds_skills_capability_from_url_list() -> None:
     )
     with patch("agent_factory.make_skills_capability", side_effect=fake_make):
         _build_registry(global_cfg, profile, working_dir)["skills"](
-            ["http://gitea.example/autonomous/agentic/wiki/Skills/Foo.-"]
+            ["http://gitea.example/agentic/agentic/wiki/Issue-Triage"]
         )
 
     assert captured["urls"] == [
-        "http://gitea.example/autonomous/agentic/wiki/Skills/Foo.-"
+        "http://gitea.example/agentic/agentic/wiki/Issue-Triage"
     ]
     assert captured["base_url"] == "http://gitea.example"
     assert captured["token"] == "token"
@@ -403,7 +403,7 @@ def test_registry_skills_profile_overrides_global() -> None:
         gitea=GiteaGlobalConfig(base_url="http://gitea.example", mcp_command=[]),
         capabilities={
             "skills": [
-                "http://gitea.example/owner/repo/wiki/Global.-",
+                "http://gitea.example/owner/repo/wiki/Global",
             ],
         },
     )
@@ -414,8 +414,8 @@ def test_registry_skills_profile_overrides_global() -> None:
         instructions="test",
         capabilities={
             "skills": [
-                "http://gitea.example/owner/repo/wiki/Profile-A.-",
-                "http://gitea.example/owner/repo/wiki/Profile-B.-",
+                "http://gitea.example/owner/repo/wiki/Profile-A",
+                "http://gitea.example/owner/repo/wiki/Profile-B",
             ],
         },
     )
@@ -435,8 +435,8 @@ def test_registry_skills_profile_overrides_global() -> None:
         _build_registry(global_cfg, profile, working_dir)["skills"](merged["skills"])
 
     assert captured["urls"] == [
-        "http://gitea.example/owner/repo/wiki/Profile-A.-",
-        "http://gitea.example/owner/repo/wiki/Profile-B.-",
+        "http://gitea.example/owner/repo/wiki/Profile-A",
+        "http://gitea.example/owner/repo/wiki/Profile-B",
     ]
 
 

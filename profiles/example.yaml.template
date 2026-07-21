@@ -51,7 +51,7 @@ capabilities:
   # (because of how the wiki stores sub-pages on disk), so the URL
   # must include that suffix verbatim.
   # skills:
-  #   - http://gitea.ai/autonomous/agentic/wiki/Skills/Issue-Triage.-
+  #   - http://gitea.ai/agentic/agentic/wiki/Issue-Triage
   # memory:
   #   backend: file        # "memory" (default, ephemeral) or "file" (on-disk JSON)
   #   # When backend: file, the path defaults to ~/.agentic/<profile>/memory.json.

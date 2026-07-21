@@ -8,7 +8,7 @@ gitea:
     # Command to launch the Gitea MCP server via stdio.
     # Environment variables GITEA_HOST and GITEA_ACCESS_TOKEN are injected
     # automatically per-profile at runtime.
-    command: ["go", "run", "gitea.ai/autonomous/gitea-mcp@main", "-t", "stdio"]
+    command: ["go", "run", "gitea.ai/agentic/gitea-mcp@main", "-t", "stdio"]
 
 # Default working directory for tool/command execution. Relative paths are
 # resolved from this file's directory. Profiles can override this value.

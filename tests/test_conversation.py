@@ -309,7 +309,7 @@ def test_close_pending_tool_calls_treats_retry_prompt_as_closure() -> None:
     Otherwise the next ``iter(message_history=...)`` sees two responses for
     one ``tool_call_id`` and the model provider returns HTTP 400.
 
-    Mirrors the autonomous/agentic#237 scenario: 5 ``run_code`` calls that
+    Mirrors the agentic/agentic#237 scenario: 5 ``run_code`` calls that
     errored out (ModuleNotFoundError, GetContentsOrList err, unknown
     method) all came back as ``RetryPromptPart``; the older implementation
     treated them as pending and wrote 5 duplicate synthetic closures.

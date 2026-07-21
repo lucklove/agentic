@@ -38,11 +38,11 @@ def test_build_gitea_url_uses_token_owner_and_repo() -> None:
     url = GITHUB_TO_GITEA.build_gitea_url(
         "http://gitea.ai/",
         "secret-token",
-        "autonomous",
+        "agentic",
         "docker-image-controller",
     )
 
-    assert url == "http://secret-token@gitea.ai/autonomous/docker-image-controller.git"
+    assert url == "http://secret-token@gitea.ai/agentic/docker-image-controller.git"
 
 
 def test_build_github_ssh_url() -> None:
@@ -85,19 +85,17 @@ def test_github_repo_name_rejects_invalid() -> None:
 
 
 def test_gitea_repo_name_extracts_owner_and_repo() -> None:
-    name = GITEA_TO_GITHUB.gitea_repo_name(
-        "https://token@gitea.ai/autonomous/agentic.git"
-    )
-    assert name == "autonomous/agentic"
-    name2 = GITEA_TO_GITHUB.gitea_repo_name("http://gitea.ai/autonomous/agentic.git")
-    assert name2 == "autonomous/agentic"
+    name = GITEA_TO_GITHUB.gitea_repo_name("https://token@gitea.ai/agentic/agentic.git")
+    assert name == "agentic/agentic"
+    name2 = GITEA_TO_GITHUB.gitea_repo_name("http://gitea.ai/agentic/agentic.git")
+    assert name2 == "agentic/agentic"
 
 
 def test_gitea_repo_name_with_install_prefix() -> None:
     name = GITEA_TO_GITHUB.gitea_repo_name(
-        "https://token@gitea.example/git/autonomous/agentic.git"
+        "https://token@gitea.example/git/agentic/agentic.git"
     )
-    assert name == "autonomous/agentic"
+    assert name == "agentic/agentic"
 
 
 def test_gitea_repo_name_rejects_invalid() -> None:
@@ -123,26 +121,26 @@ gitea:
 """)
 
     url = GITHUB_TO_GITEA.discover_gitea_url(
-        "autonomous",
+        "agentic",
         "docker-image-controller",
         "ops_agent",
         global_config_path=global_config,
         agentic_dir=agentic_dir,
     )
 
-    assert url == "http://top-secret@gitea.ai/autonomous/docker-image-controller.git"
+    assert url == "http://top-secret@gitea.ai/agentic/docker-image-controller.git"
 
 
 def test_gitea_api_repo_url_preserves_install_prefix() -> None:
     url = GITHUB_TO_GITEA.gitea_api_repo_url(
-        "https://token@gitea.example/git/autonomous/agentic.git",
-        "autonomous",
+        "https://token@gitea.example/git/agentic/agentic.git",
+        "agentic",
         "agentic",
     )
 
     assert (
         url
-        == "https://gitea.example/git/api/v1/repos/autonomous/agentic/pulls?state=open&limit=1"
+        == "https://gitea.example/git/api/v1/repos/agentic/agentic/pulls?state=open&limit=1"
     )
 
 
@@ -156,9 +154,9 @@ def test_assert_no_open_gitea_prs_allows_empty_list(
     )
 
     GITHUB_TO_GITEA.assert_no_open_gitea_prs(
-        "autonomous",
         "agentic",
-        "http://token@gitea.ai/autonomous/agentic.git",
+        "agentic",
+        "http://token@gitea.ai/agentic/agentic.git",
         "ops_agent",
     )
 
@@ -174,19 +172,17 @@ def test_assert_no_open_gitea_prs_rejects_open_pulls(
 
     with pytest.raises(SystemExit, match="has open pull requests"):
         GITHUB_TO_GITEA.assert_no_open_gitea_prs(
-            "autonomous",
             "agentic",
-            "http://token@gitea.ai/autonomous/agentic.git",
+            "agentic",
+            "http://token@gitea.ai/agentic/agentic.git",
             "ops_agent",
         )
 
 
 def test_rewrite_body_strips_gitea_links() -> None:
     rewritten = GITEA_TO_GITHUB.rewrite_body(
-        "\nSee http://gitea.ai/autonomous/agentic/issues/155\n\nMore context\n",
-        GITEA_TO_GITHUB.gitea_url_pattern(
-            "http://token@gitea.ai/autonomous/agentic.git"
-        ),
+        "\nSee http://gitea.ai/agentic/agentic/issues/155\n\nMore context\n",
+        GITEA_TO_GITHUB.gitea_url_pattern("http://token@gitea.ai/agentic/agentic.git"),
     )
 
     assert rewritten == "See\n\nMore context"
@@ -196,9 +192,7 @@ def test_validate_pr_text_accepts_clean_input() -> None:
     title, body = GITEA_TO_GITHUB.validate_pr_text(
         "Improve repo sync skill",
         "Port the validated commit without forge-specific references.",
-        GITEA_TO_GITHUB.gitea_url_pattern(
-            "http://token@gitea.ai/autonomous/agentic.git"
-        ),
+        GITEA_TO_GITHUB.gitea_url_pattern("http://token@gitea.ai/agentic/agentic.git"),
     )
 
     assert title == "Improve repo sync skill"
@@ -212,7 +206,7 @@ def test_validate_pr_text_accepts_clean_input() -> None:
         ("Improve repo sync skill", "References #155", "body must not include issue"),
         (
             "Improve repo sync skill",
-            "See http://gitea.ai/autonomous/agentic/issues/155",
+            "See http://gitea.ai/agentic/agentic/issues/155",
             "body must not include Gitea links",
         ),
     ],
@@ -227,6 +221,6 @@ def test_validate_pr_text_rejects_forbidden_references(
             title,
             body,
             GITEA_TO_GITHUB.gitea_url_pattern(
-                "http://token@gitea.ai/autonomous/agentic.git"
+                "http://token@gitea.ai/agentic/agentic.git"
             ),
         )
