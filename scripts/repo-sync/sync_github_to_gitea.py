@@ -3,7 +3,7 @@
 # requires-python = ">=3.14"
 # dependencies = ["pyyaml>=6.0"]
 # ///
-"""Clone from GitHub (SSH) and force-push to Gitea for repo-sync."""
+"""Clone from Gitea, add GitHub as upstream, and force-push to Gitea for repo-sync."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 import yaml
 
 CREDENTIAL_URL_RE = re.compile(r"(https?://)[^\s/@]+@")
+GITHUB_REMOTE_NAME = "upstream"
 ROOT_DIR = Path(__file__).resolve().parents[3]
 DEFAULT_GLOBAL_CONFIG = Path.home() / ".agentic" / "agentic.yaml"
 DEFAULT_AGENTIC_DIR = Path.home() / ".agentic"
@@ -211,7 +212,7 @@ def assert_no_open_gitea_prs(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Clone from GitHub (SSH) and force-push to Gitea.",
+        description="Clone from Gitea, add GitHub as upstream, and force-push to Gitea.",
     )
     parser.add_argument("--repo-dir", required=True, type=Path)
     parser.add_argument("--gitea-owner", required=True)
@@ -231,10 +232,38 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     assert_no_open_gitea_prs(args.gitea_owner, args.repo, args.gitea_url, args.profile)
+    # Clone from the local Gitea mirror (much faster than SSH-cloning GitHub).
     run(
-        ["git", "clone", args.github_url, str(args.repo_dir)],
+        ["git", "clone", args.gitea_url, str(args.repo_dir)],
         dry_run=args.dry_run,
     )
+    # Add GitHub as a temporary upstream so we can fetch its main branch.
+    run(
+        [
+            "git",
+            "-C",
+            str(args.repo_dir),
+            "remote",
+            "add",
+            GITHUB_REMOTE_NAME,
+            args.github_url,
+        ],
+        dry_run=args.dry_run,
+    )
+    # Fetch GitHub main into a named remote-tracking ref so the working tree
+    # is not disturbed by the fetch; this is what we will force-push.
+    run(
+        [
+            "git",
+            "-C",
+            str(args.repo_dir),
+            "fetch",
+            GITHUB_REMOTE_NAME,
+            f"{args.main_branch}:refs/remotes/{GITHUB_REMOTE_NAME}/{args.main_branch}",
+        ],
+        dry_run=args.dry_run,
+    )
+    # Force-push the GitHub-fetched tip to Gitea main, independent of local HEAD.
     run(
         [
             "git",
@@ -243,7 +272,19 @@ def main() -> None:
             "push",
             "--force",
             args.gitea_url,
-            f"HEAD:refs/heads/{args.main_branch}",
+            f"{GITHUB_REMOTE_NAME}/{args.main_branch}:refs/heads/{args.main_branch}",
+        ],
+        dry_run=args.dry_run,
+    )
+    # Drop the temporary upstream so a re-run does not accumulate remotes.
+    run(
+        [
+            "git",
+            "-C",
+            str(args.repo_dir),
+            "remote",
+            "remove",
+            GITHUB_REMOTE_NAME,
         ],
         dry_run=args.dry_run,
     )
