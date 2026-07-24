@@ -119,6 +119,10 @@ class HarnessCapability(AbstractCapability[AgentDeps]):
                 "(which may have caused the error), recall it and increase its "
                 "importance.\n"
                 "- If an outdated memory caused the error, delete that memory.\n"
+                "- If the error was caused by incorrect guidance from a wiki "
+                "page, first correct that wiki page (if you know how to fix it), "
+                "then delete a non-existent memory key to acknowledge you've "
+                "addressed the underlying guidance.\n"
                 "- If the error is trivial or not worth remembering, "
                 "delete a non-existent memory key to acknowledge you've considered it."
             )
