@@ -6,6 +6,10 @@
 #   "pydantic-ai-backend>=0.2.6",
 #   "httpx>=0.28.0",
 #   "pyyaml>=6.0",
+#   # Pin pydantic-monty<0.0.19: pydantic-ai-harness (all releases up to 0.9.0)
+#   # still imports MontyRepl, which was removed from pydantic_monty in 0.0.19.
+#   # Drop this once harness publishes a release that replaces MontyRepl with `Monty`.
+#   "pydantic-monty>=0.0.18,<0.0.19",
 # ]
 # ///
 """

@@ -45,7 +45,7 @@ from model_factory import build_model
 __all__ = ["make_agent"]
 
 # Type alias for a capability factory function.
-_CapabilityFactory = Callable[[dict[str, Any]], AbstractCapability]
+_CapabilityFactory = Callable[[dict[str, Any]], AbstractCapability[Any]]
 
 _AGENTIC_DIR = Path.home() / ".agentic"
 
@@ -91,7 +91,11 @@ def _build_registry(
     return {
         "code_exec": lambda opts: CodeMode(
             **opts,
-            mount=MountDir(str(working_dir), str(working_dir), mode="read-write"),
+            mount=MountDir(
+                host_path=str(working_dir),
+                virtual_path=str(working_dir),
+                mode="read-write",
+            ),
         ),
         "gitea": lambda opts: make_gitea_capability(
             base_url=global_cfg.gitea.base_url,
