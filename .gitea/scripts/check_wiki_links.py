@@ -136,22 +136,65 @@ def split_owner_repo_from_url(url: str) -> tuple[str, str, str] | None:
 # ---------------------------------------------------------------------------
 
 
-def fetch_known_wiki_pages(api_base: str, owner: str, repo: str) -> set[str]:
-    """Pull the canonical wiki page list from the Gitea API, normalized."""
+def fetch_known_wiki_pages(
+    api_base: str, owner: str, repo: str, retries: int = 3
+) -> set[str]:
+    """Pull the canonical wiki page list from the Gitea API, normalized.
+
+    Transient ``URLError`` / ``HTTPError`` are retried up to ``retries`` times
+    with exponential backoff (1s, 2s, 4s, ...). A 404 is treated as
+    "wiki disabled or empty repo" and short-circuits to an empty set, exactly
+    as before; any other failure after the final attempt is re-raised so the
+    caller can decide whether it is fatal.
+
+    The retry happens here rather than at every call-site so that a single
+    transient API blip does not get silently turned into a "broken wiki page"
+    attribution downstream (see #258 for the false-positive bug this fixed).
+    """
     url = f"{api_base}/api/v1/repos/{owner}/{repo}/wiki/pages"
     LOG.info("fetching wiki page index from %s", url)
-    try:
-        with urllib.request.urlopen(url, timeout=20) as r:
-            data = json.loads(r.read())
-    except urllib.error.HTTPError as e:
-        # 404 = wiki disabled / empty repo; the caller decides whether that is fatal.
-        if e.code == 404:
-            LOG.warning("wiki pages API returned 404 -- wiki may be empty or disabled")
-            return set()
-        raise
-    except urllib.error.URLError as e:
-        raise RuntimeError(f"could not reach wiki API at {url}: {e}") from e
-    return {normalize_slug(p["title"]) for p in data}
+    last_err: urllib.error.URLError | urllib.error.HTTPError | None = None
+    for attempt in range(retries):
+        try:
+            with urllib.request.urlopen(url, timeout=20) as r:
+                data = json.loads(r.read())
+            return {normalize_slug(p["title"]) for p in data}
+        except urllib.error.HTTPError as e:
+            # 404 = wiki disabled / empty repo; short-circuit to empty.
+            if e.code == 404:
+                LOG.warning(
+                    "wiki pages API returned 404 -- wiki may be empty or disabled"
+                )
+                return set()
+            last_err = e
+            if attempt < retries - 1:
+                LOG.info(
+                    "wiki index fetch retry %d/%d after HTTP %d for %s",
+                    attempt + 1,
+                    retries,
+                    e.code,
+                    url,
+                )
+                time.sleep(2**attempt)
+                continue
+            raise
+        except urllib.error.URLError as e:
+            last_err = e
+            if attempt < retries - 1:
+                LOG.info(
+                    "wiki index fetch retry %d/%d after %s for %s",
+                    attempt + 1,
+                    retries,
+                    e,
+                    url,
+                )
+                time.sleep(2**attempt)
+                continue
+            raise RuntimeError(f"could not reach wiki API at {url}: {e}") from e
+    # Unreachable: every loop branch either returns, raises, or continues.
+    raise RuntimeError(
+        f"wiki index fetch exhausted {retries} attempts for {url}: {last_err}"
+    )
 
 
 class WikiIndexCache:
@@ -238,6 +281,12 @@ class CrawlStats:
     finished_at: float | None = None
     broken_http_count: int = 0
     broken_wiki_count: int = 0
+    # Repos whose wiki index fetch we could not complete even after the
+    # 3-attempt retry in fetch_known_wiki_pages. Distinct from `broken_*`:
+    # these are unverified, not known-broken. Surfaced in the run report so
+    # the next dispatcher can distinguish "actually broken" from "couldn't
+    # check", per #258.
+    skipped_repos: list[str] = field(default_factory=list)
 
     def finalize(self) -> None:
         self.finished_at = time.time()
@@ -249,6 +298,7 @@ class CrawlStats:
         self.repos_scanned.sort(key=lambda x: (x["owner"], x["repo"]))
         self.broken_http_count = len(self.broken_http)
         self.broken_wiki_count = len(self.broken_wiki_pages)
+        self.skipped_repos.sort()
 
     def is_clean(self) -> bool:
         # Compute off the lists, not the *_count fields -- those are only set
@@ -273,6 +323,7 @@ class CrawlStats:
             "broken_http": self.broken_http,
             "broken_wiki_pages": self.broken_wiki_pages,
             "external_links_referenced": self.external_links_referenced,
+            "skipped_repos": self.skipped_repos,
             "repos_scanned": self.repos_scanned,
             "counts": {
                 "known_pages": len(self.known_pages),
@@ -280,6 +331,7 @@ class CrawlStats:
                 "broken_http": self.broken_http_count,
                 "broken_wiki_pages": self.broken_wiki_count,
                 "external_links_referenced": len(self.external_links_referenced),
+                "skipped_repos": len(self.skipped_repos),
                 "repos_scanned": len(self.repos_scanned),
             },
         }
@@ -306,9 +358,12 @@ class CrawlStats:
             )
         lines.append("")
 
-        if self.is_clean():
+        if self.is_clean() and not self.skipped_repos:
             lines.append("**No broken links found.** ")
         else:
+            # Render broken sections whenever we are NOT clean, OR when
+            # skipped_repos are present (so a reviewer always sees both
+            # real broken entries and unverified skips side by side).
             lines.append("## Broken wiki page links")
             lines.append("")
             if self.broken_wiki_pages:
@@ -332,6 +387,19 @@ class CrawlStats:
                     )
             else:
                 lines.append("_(none)_")
+            lines.append("")
+        if self.skipped_repos:
+            lines.append("## Skipped (could not verify cross-repo links)")
+            lines.append("")
+            lines.append(
+                "Wiki-index fetch failed for these repos even after the "
+                "3-attempt retry in `fetch_known_wiki_pages`. Cross-repo "
+                "links into them were NOT verified this run and are NOT "
+                "counted as broken -- see #258."
+            )
+            lines.append("")
+            for repo in self.skipped_repos:
+                lines.append(f"- `{repo}`")
             lines.append("")
         return "\n".join(lines)
 
@@ -393,6 +461,19 @@ class CrawlStats:
         else:
             print("No broken HTTP responses found.", file=stream)
 
+        print("", file=stream)
+
+        if self.skipped_repos:
+            print(
+                "::group::Skipped (could not verify cross-repo links for these repos)",
+                file=stream,
+            )
+            for repo in self.skipped_repos:
+                print(f"  - {repo}", file=stream)
+            print("::endgroup::", file=stream)
+        else:
+            print("No skipped repos.", file=stream)
+
 
 class WikiLinkCheckSpider(CrawlSpider):
     """Crawl a wiki, classify broken links, dump a JSON summary on close."""
@@ -448,6 +529,10 @@ class WikiLinkCheckSpider(CrawlSpider):
         )
         self._broken_http: dict[str, dict] = {}
         self._broken_wiki: dict[str, set[str]] = defaultdict(set)
+        # Repos whose wiki index fetch we could not complete after retries.
+        # These are reported separately from "broken wiki pages" because the
+        # links themselves are unverified, not known-broken -- see #258.
+        self._skipped_repos: set[str] = set()
         self._visited_ok: set[str] = set()
         self._ext_referenced: dict[str, set[str]] = defaultdict(set)
         self._headed: set[str] = set()
@@ -500,17 +585,21 @@ class WikiLinkCheckSpider(CrawlSpider):
                     try:
                         known_for_target = self.index_cache.get(api_base, owner, repo)
                     except Exception as e:
-                        # Surface the fetch failure but don't crash the
-                        # crawl -- mark the slug as broken so it shows
-                        # up in the report alongside HTTP errors.
+                        # Persistent fetch failure: record the offending repo
+                        # in skipped_repos rather than marking the slug as
+                        # broken. Transient blips should already be absorbed
+                        # by the retry in fetch_known_wiki_pages; anything
+                        # reaching this branch is genuinely unverified.
+                        # Reporting it as "broken" would falsely flip the
+                        # run to exit 2 (issue #258 -- false positives).
                         LOG.warning(
-                            "wiki index fetch failed for %s/%s/%s: %s",
+                            "wiki index fetch failed for %s/%s/%s: %s -- skipping cross-repo check",
                             api_base,
                             owner,
                             repo,
                             e,
                         )
-                        self._broken_wiki[slug].add(url)
+                        self._skipped_repos.add(f"{owner}/{repo}")
                         continue
                     if slug not in known_for_target:
                         self._broken_wiki[slug].add(url)
@@ -579,6 +668,7 @@ class WikiLinkCheckSpider(CrawlSpider):
             for slug, srcs in self._broken_wiki.items()
         ]
         self.stats.external_links_referenced = sorted(self._ext_referenced.keys())
+        self.stats.skipped_repos = sorted(self._skipped_repos)
         self.stats.repos_scanned = [
             {
                 "api_base": api_base,
