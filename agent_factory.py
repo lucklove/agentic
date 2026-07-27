@@ -119,6 +119,7 @@ def _build_registry(
                 "inject_memories_in_instructions", True
             ),
             max_instructions_memories=opts.get("max_instructions_memories", 20),
+            instructions_sort=opts.get("instructions_sort", "score"),
         ),
         "harness": lambda opts: HarnessCapability(),
         "privacy": lambda opts: PrivacyCapability.from_spec(opts),

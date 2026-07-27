@@ -15,6 +15,7 @@ from capabilities.compaction import (
     OpenAICompaction,
 )
 from capabilities.harness import HarnessCapability
+from capabilities.memory import Memory
 from config import GiteaGlobalConfig, GiteaProfileConfig, GlobalConfig, ProfileConfig
 from deps import AgentDeps
 
@@ -513,3 +514,27 @@ def test_make_agent_profile_empty_mcp_overrides_global() -> None:
     mcp_caps = [c for c in built_caps if isinstance(c, MCPServersCapability)]
     assert len(mcp_caps) == 1
     assert mcp_caps[0].get_toolset() is not None
+
+
+# ── `Memory` registry wiring (regression for #264 review feedback) ────────────
+#
+# Without these, `capabilities.memory.instructions_sort: <value>` in
+# agentic.yaml is silently ignored — the factory lambda enumerates kwargs
+# by hand instead of `**opts`, so a new field on `Memory.from_spec` is
+# invisible to YAML until it is added to the lambda explicitly.
+
+
+def test_registry_memory_threads_instructions_sort_from_opts() -> None:
+    """The `memory` registry lambda forwards `instructions_sort` to `Memory.from_spec`."""
+    for sort in ("score", "recency", "importance", "insertion"):
+        capability = _registry()["memory"]({"instructions_sort": sort})
+        assert isinstance(capability, Memory)
+        assert capability.instructions_sort == sort
+
+
+def test_registry_memory_default_instructions_sort_is_score() -> None:
+    """Omitting `instructions_sort` in opts yields the default `"score"`."""
+    capability = _registry()["memory"]({})
+
+    assert isinstance(capability, Memory)
+    assert capability.instructions_sort == "score"

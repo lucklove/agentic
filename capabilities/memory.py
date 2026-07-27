@@ -14,7 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Protocol, TypeAlias, TypedDict, runtime_checkable
+from typing import Any, Literal, Protocol, TypeAlias, TypedDict, runtime_checkable
 
 from pydantic_ai._instructions import AgentInstructions
 from pydantic_ai.capabilities.abstract import AbstractCapability
@@ -216,6 +216,42 @@ def exponential_decay(
         return weight * (2 ** (-age_days / half_life_days))
 
     return scorer
+
+
+InstructionsSort: TypeAlias = Literal["score", "recency", "importance", "insertion"]
+"""Sort policy for non-pinned memories in `Memory.build_instructions`."""
+
+
+def _instructions_sort_key(
+    entry: MemoryEntry,
+    sort: InstructionsSort,
+    recency_scorer: RecencyScorer | None,
+) -> float:
+    """Score a non-pinned `MemoryEntry` for the `build_instructions` selector.
+
+    Higher = ranked earlier. Only used when `sort != "insertion"` (the
+    `"insertion"` mode falls through to dict-insertion order without consulting
+    this helper — see the `Memory.instructions_sort` field docstring).
+
+    - ``"score"`` (default): additive ``entry.importance + recency_scorer(entry)``,
+      mirroring `MemoryStore.search` semantics.
+    - ``"recency"``: pure `recency_scorer(entry)`; `importance` is ignored.
+    - ``"importance"``: pure `entry.importance or 0.0`; `recency_scorer` is ignored.
+
+    Entries with `importance=None` contribute `0.0` from that component; entries
+    scored with `recency_scorer=None` contribute `0.0` from that component.
+    """
+    if sort == "recency":
+        return recency_scorer(entry) if recency_scorer is not None else 0.0
+    if sort == "importance":
+        return entry.importance if entry.importance is not None else 0.0
+    # sort == "score"
+    score: float = 0.0
+    if entry.importance is not None:
+        score += entry.importance
+    if recency_scorer is not None:
+        score += recency_scorer(entry)
+    return score
 
 
 def _saves_in_history(messages: list[ModelMessage]) -> dict[str, str]:
@@ -606,6 +642,20 @@ class Memory(AbstractCapability[AgentDepsT]):
     Pass any `Callable[[MemoryEntry], float]` for custom decay shapes.
     """
 
+    instructions_sort: InstructionsSort = "score"
+    """Ranking policy for non-pinned memories in `build_instructions`.
+
+    - ``"score"`` (default): additive ``entry.importance + recency_scorer(entry)``,
+      mirroring `MemoryStore.search` semantics. Newest + most important entries win.
+    - ``"recency"``: pure `recency_scorer(entry)`; `importance` is ignored.
+    - ``"importance"``: pure `entry.importance or 0.0`; `recency_scorer` is ignored.
+    - ``"insertion"``: legacy dict-insertion order (pre-fix behavior; opt-in for
+      callers that depend on it).
+
+    Pinned (`read_only=True`) entries always stay first regardless of this setting,
+    and `dedup_recent_saves` / `byte_budget` apply after sort.
+    """
+
     tool_descriptions: dict[str, str] = field(default_factory=lambda: dict[str, str]())
     """Per-tool description overrides. Keys are tool names (`save_memory`, `recall_memory`,
     `search_memories`, `list_memories`, `delete_memory`); values replace the docstring used
@@ -634,6 +684,7 @@ class Memory(AbstractCapability[AgentDepsT]):
         path: str = ".memories.json",
         inject_memories_in_instructions: bool = True,
         max_instructions_memories: int = 20,
+        instructions_sort: InstructionsSort = "score",
     ) -> Memory[Any]:
         """Create from spec arguments.
 
@@ -642,6 +693,8 @@ class Memory(AbstractCapability[AgentDepsT]):
             path: File path for the `"file"` backend (default `".memories.json"`).
             inject_memories_in_instructions: Whether to inject memories into the system prompt.
             max_instructions_memories: Maximum memories to inject into the system prompt.
+            instructions_sort: Ranking policy for non-pinned memories in `build_instructions`.
+                See the `instructions_sort` field for details. Default `"score"`.
         """
         store: MemoryStore
         if backend == "memory":
@@ -656,19 +709,24 @@ class Memory(AbstractCapability[AgentDepsT]):
             store=store,
             inject_memories_in_instructions=inject_memories_in_instructions,
             max_instructions_memories=max_instructions_memories,
+            instructions_sort=instructions_sort,
         )
 
     def build_instructions(self, ctx: RunContext[AgentDepsT]) -> str:
         """Build dynamic instructions that include currently stored memories.
 
         Selection rules:
-        - `read_only=True` entries always inject (bypass count cap, byte budget, and dedup).
+        - `read_only=True` entries always inject (bypass count cap, byte budget, and dedup),
+          and stay listed first regardless of `instructions_sort`.
         - Non-pinned entries respect `max_instructions_memories` and `byte_budget`.
+        - Non-pinned entries are ranked by `instructions_sort`:
+          `"score"` (default, additive importance + recency), `"recency"` (pure
+          recency_scorer), `"importance"` (pure `entry.importance`), or `"insertion"`
+          (legacy dict-insertion order).
         - When `entry.summary` is set, it's preferred over `entry.content` to save tokens.
         - When `dedup_recent_saves` is True, entries whose current content matches
           the most recent `save_memory` call in this run's tool history are suppressed
           (the LLM has already seen the value via the tool call).
-        - Pinned entries are listed first.
         """
         parts: list[str] = [
             "You have access to a persistent memory system. "
@@ -689,8 +747,18 @@ class Memory(AbstractCapability[AgentDepsT]):
             _saves_in_history(ctx.messages) if self.dedup_recent_saves else {}
         )
 
-        # Pinned first, then the rest in store order
-        ordered = sorted(entries, key=lambda e: not e.read_only)
+        # Pinned first; non-pinned ranked by `instructions_sort` (insertion order
+        # under `"insertion"`, otherwise `_instructions_sort_key` high-to-low).
+        pinned = [e for e in entries if e.read_only]
+        non_pinned = [e for e in entries if not e.read_only]
+        if self.instructions_sort != "insertion":
+            non_pinned.sort(
+                key=lambda e: _instructions_sort_key(
+                    e, self.instructions_sort, self.recency_scorer
+                ),
+                reverse=True,
+            )
+        ordered = pinned + non_pinned
 
         formatted: list[str] = []
         used_bytes = 0
