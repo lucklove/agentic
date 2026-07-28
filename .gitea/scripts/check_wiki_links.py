@@ -48,11 +48,6 @@ import urllib.request
 from collections import defaultdict
 from dataclasses import dataclass, field
 
-import scrapy
-from scrapy import signals
-from scrapy.linkextractors import LinkExtractor
-from scrapy.spiders import CrawlSpider, Rule
-
 LOG = logging.getLogger("check_wiki_links")
 
 
@@ -65,10 +60,33 @@ def normalize_slug(raw: str) -> str:
     """Canonical form of a wiki page name for equality checks.
 
     Gitea wiki URLs use hyphens (Writing-Plans), API titles use spaces
-    (Writing Plans), and raw-view URLs append .md. Normalize to
-    lowercase hyphen form so all three compare equal.
+    (Writing Plans), and raw-view URLs append .md. Some pages carry
+    percent-encoded characters in their sub_url (e.g. ``%E2%80%94`` for
+    an em-dash) and ``+``-encoded spaces (form-encoding style). A few
+    legacy pages also keep a trailing ``.-`` artifact in sub_url that
+    no longer appears in the title. Normalize to lowercase hyphen form
+    so every representation compares equal:
+
+      1. ``unquote_plus`` decodes ``%xx`` and ``"+"`` -> space (no-op
+         on plain ASCII titles).
+      2. ``lower()`` folds case so markdown sources that disagree with
+         the API title's casing still match.
+      3. ``" "`` -> ``"-"`` matches both space-form (Writing Plans) and
+         hyphen-form (Writing-Plans) titles.
+      4. Strip trailing ``.-`` (legacy sub_url artifact, e.g.
+         ``...tidb-management-service#4.-``).
+      5. Strip trailing ``.md`` (raw-view URL suffix).
+
+    Without (1) and (4), link slugs like
+    ``Commander-Memory-%E2%80%94-%23257`` would never match the API
+    title ``Commander Memory \u2014 #257``, producing false-positive
+    "missing wiki page" reports for every link into such a page
+    (see #265).
     """
-    s = raw.strip().lower().replace(" ", "-")
+    s = urllib.parse.unquote_plus(raw)
+    s = s.strip().lower().replace(" ", "-")
+    if s.endswith(".-"):
+        s = s[:-2]
     if s.endswith(".md"):
         s = s[:-3]
     return s
@@ -141,6 +159,12 @@ def fetch_known_wiki_pages(
 ) -> set[str]:
     """Pull the canonical wiki page list from the Gitea API, normalized.
 
+    The Gitea wiki-pages API paginates with a default page size of 30;
+    the agentic wiki has 40 pages, so an unpaginated fetch misses the
+    last 10 and reports every link into them as "missing" (false
+    positive -- see #265). Walk all pages with ``?page=N&limit=50``,
+    stopping when a page returns fewer than the page size or is empty.
+
     Transient ``URLError`` / ``HTTPError`` are retried up to ``retries`` times
     with exponential backoff (1s, 2s, 4s, ...). A 404 is treated as
     "wiki disabled or empty repo" and short-circuits to an empty set, exactly
@@ -151,50 +175,73 @@ def fetch_known_wiki_pages(
     transient API blip does not get silently turned into a "broken wiki page"
     attribution downstream (see #258 for the false-positive bug this fixed).
     """
-    url = f"{api_base}/api/v1/repos/{owner}/{repo}/wiki/pages"
-    LOG.info("fetching wiki page index from %s", url)
-    last_err: urllib.error.URLError | urllib.error.HTTPError | None = None
-    for attempt in range(retries):
-        try:
-            with urllib.request.urlopen(url, timeout=20) as r:
-                data = json.loads(r.read())
-            return {normalize_slug(p["title"]) for p in data}
-        except urllib.error.HTTPError as e:
-            # 404 = wiki disabled / empty repo; short-circuit to empty.
-            if e.code == 404:
-                LOG.warning(
-                    "wiki pages API returned 404 -- wiki may be empty or disabled"
-                )
-                return set()
-            last_err = e
-            if attempt < retries - 1:
-                LOG.info(
-                    "wiki index fetch retry %d/%d after HTTP %d for %s",
-                    attempt + 1,
-                    retries,
-                    e.code,
-                    url,
-                )
-                time.sleep(2**attempt)
-                continue
-            raise
-        except urllib.error.URLError as e:
-            last_err = e
-            if attempt < retries - 1:
-                LOG.info(
-                    "wiki index fetch retry %d/%d after %s for %s",
-                    attempt + 1,
-                    retries,
-                    e,
-                    url,
-                )
-                time.sleep(2**attempt)
-                continue
-            raise RuntimeError(f"could not reach wiki API at {url}: {e}") from e
-    # Unreachable: every loop branch either returns, raises, or continues.
-    raise RuntimeError(
-        f"wiki index fetch exhausted {retries} attempts for {url}: {last_err}"
+    base_url = f"{api_base}/api/v1/repos/{owner}/{repo}/wiki/pages"
+    page_size = 50
+    LOG.info(
+        "fetching wiki page index from %s (paginated, page_size=%d)",
+        base_url,
+        page_size,
     )
+    seen: set[str] = set()
+    page = 1
+    while True:
+        url = f"{base_url}?page={page}&limit={page_size}"
+        last_err: urllib.error.URLError | urllib.error.HTTPError | None = None
+        data: list | None = None
+        for attempt in range(retries):
+            try:
+                with urllib.request.urlopen(url, timeout=20) as r:
+                    data = json.loads(r.read())
+                break
+            except urllib.error.HTTPError as e:
+                # 404 = wiki disabled / empty repo; short-circuit to empty.
+                if e.code == 404:
+                    LOG.warning(
+                        "wiki pages API returned 404 -- wiki may be empty or disabled"
+                    )
+                    return set()
+                last_err = e
+                if attempt < retries - 1:
+                    LOG.info(
+                        "wiki index fetch retry %d/%d after HTTP %d for %s",
+                        attempt + 1,
+                        retries,
+                        e.code,
+                        url,
+                    )
+                    time.sleep(2**attempt)
+                    continue
+                raise
+            except urllib.error.URLError as e:
+                last_err = e
+                if attempt < retries - 1:
+                    LOG.info(
+                        "wiki index fetch retry %d/%d after %s for %s",
+                        attempt + 1,
+                        retries,
+                        e,
+                        url,
+                    )
+                    time.sleep(2**attempt)
+                    continue
+                raise RuntimeError(f"could not reach wiki API at {url}: {e}") from e
+        if data is None:
+            # Every retry branch either returns, raises, or continues and
+            # `break`s on success; reaching here means all attempts failed
+            # without an explicit raise, which only happens if `retries == 0`.
+            raise RuntimeError(
+                f"wiki index fetch exhausted retries for {url}: {last_err}"
+            )
+        if not data:
+            # Empty page = end of pagination. Avoids an extra round-trip when
+            # the API stops returning data partway through.
+            break
+        for entry in data:
+            seen.add(normalize_slug(entry["title"]))
+        if len(data) < page_size:
+            break
+        page += 1
+    return seen
 
 
 class WikiIndexCache:
@@ -238,6 +285,14 @@ class WikiIndexCache:
 # Spider
 # ---------------------------------------------------------------------------
 
+# Scrapy is only needed by the spider class below; the helpers above
+# (normalize_slug, wiki_page_name_from_url, fetch_known_wiki_pages,
+# WikiIndexCache, ...) must import cleanly without it so tests can load
+# them under plain pytest without pulling the heavy scrapy dep.
+import scrapy  # noqa: E402  (deliberately late; see comment above)
+from scrapy import signals  # noqa: E402
+from scrapy.linkextractors import LinkExtractor  # noqa: E402
+from scrapy.spiders import CrawlSpider, Rule  # noqa: E402
 
 # Patterns we never want to crawl -- admin views, source view, static assets.
 # These run inside Scrapy's LinkExtractor and are PCRE-compatible.
