@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 from pydantic_ai import Agent
 from pydantic_ai.messages import (
@@ -16,6 +17,7 @@ from pydantic_ai.models.function import FunctionModel
 
 from capabilities.compaction import AnchoredCompaction
 from capabilities.privacy import PrivacyCapability
+from deps import WikiRead
 
 
 def _request(text: str) -> ModelRequest:
@@ -283,3 +285,142 @@ def test_disabled_anchored_compaction_is_a_noop() -> None:
     assert len(calls) == 1
     assert "old request" in str(calls[0])
     assert "agentic_compaction" not in str(result.all_messages())
+
+
+# ----------------------------------------------------------------------------
+# Already-Read Wikis section (issue #267)
+# ----------------------------------------------------------------------------
+
+
+def test_summary_template_contains_already_read_wikis_section() -> None:
+    """The compaction template must carry the new ``## Already-Read
+    Wikis`` section so the summarizer knows to fill it in.
+    """
+    from capabilities.compaction import _SUMMARY_TEMPLATE
+
+    assert "## Already-Read Wikis" in _SUMMARY_TEMPLATE
+    # The re-read hint is part of the contract -- without it, a later
+    # turn would treat the preview as authoritative and miss the
+    # instruction to refresh the page when relevant.
+    assert "re-read" in _SUMMARY_TEMPLATE.lower()
+
+
+def test_format_wiki_reads_lists_each_entry() -> None:
+    """The ``<wiki-reads>`` block the summarizer sees lists every page
+    the agent consulted, with the page identifier on the left and the
+    short preview on the right. Empty input renders ``(none yet)`` so
+    the summarizer knows the agent has not consulted any wiki yet.
+    """
+    entries = [
+        WikiRead(
+            owner="agentic",
+            repo="agentic",
+            page_name="Agent-Handbook",
+            summary="Common handbook for run_code sandbox and Gitea MCP.",
+        ),
+        WikiRead(
+            owner="agentic",
+            repo="agentic",
+            page_name="Code-Agent-Workflow",
+            summary="Operating workflow for the code_agent profile.",
+        ),
+    ]
+
+    rendered = AnchoredCompaction._format_wiki_reads(entries)
+    assert "<wiki-reads>" in rendered
+    assert "</wiki-reads>" in rendered
+    assert "agentic/agentic/Agent-Handbook" in rendered
+    assert "Common handbook for run_code sandbox and Gitea MCP." in rendered
+    assert "agentic/agentic/Code-Agent-Workflow" in rendered
+    assert "Operating workflow for the code_agent profile." in rendered
+
+    empty = AnchoredCompaction._format_wiki_reads([])
+    assert "(none yet)" in empty
+
+
+def test_build_prompt_embeds_wiki_reads() -> None:
+    """``_build_prompt`` plumbs the wiki reads into the summarizer
+    prompt and reminds the model to copy each entry into the
+    ``## Already-Read Wikis`` section of the output.
+    """
+    capability = AnchoredCompaction(message_count_threshold=4, tail_turns=1)
+    entries = [
+        WikiRead(
+            owner="agentic",
+            repo="agentic",
+            page_name="Agent-Handbook",
+            summary="Common handbook for run_code sandbox and Gitea MCP.",
+        ),
+    ]
+    prompt = capability._build_prompt(
+        previous_summary=None,
+        history="[User]: old request",
+        wiki_reads=entries,
+    )
+
+    assert "<wiki-reads>" in prompt
+    assert "agentic/agentic/Agent-Handbook" in prompt
+    assert "Common handbook for run_code sandbox and Gitea MCP." in prompt
+    # The instructions to the summarizer ask it to copy the entries
+    # verbatim; without that the new section would be skipped.
+    assert "## Already-Read Wikis" in prompt
+    assert "Copy each entry" in prompt
+
+    # With no wiki reads the prompt still carries the empty block so
+    # the summarizer is forced to emit the section rather than skip it.
+    empty_prompt = capability._build_prompt(
+        previous_summary=None, history="[User]: old", wiki_reads=[]
+    )
+    assert "(none yet)" in empty_prompt
+
+
+def test_wiki_reads_from_ctx_falls_back_when_no_deps() -> None:
+    """Defensive: the hook should not crash when ``ctx`` is a bare
+    object without a ``deps`` attribute (e.g. a unit test fixture).
+    ``wiki_reads`` falls back to ``[]`` so summarization continues.
+    """
+    capability = AnchoredCompaction(message_count_threshold=4, tail_turns=1)
+
+    # Bare ``ctx`` -- no ``deps`` attribute at all.
+    assert capability._wiki_reads_from_ctx(SimpleNamespace()) == []
+
+    # ``deps`` present but no ``wiki_reads``.
+    assert capability._wiki_reads_from_ctx(SimpleNamespace(deps=object())) == []
+
+    # ``deps.wiki_reads`` is the wrong type -- fall back to empty
+    # rather than crashing the summarizer.
+    assert (
+        capability._wiki_reads_from_ctx(
+            SimpleNamespace(deps=SimpleNamespace(wiki_reads="not-a-list"))
+        )
+        == []
+    )
+
+
+def test_compaction_hook_does_not_crash_without_wiki_reads() -> None:
+    """Sanity check: ``before_model_request`` runs to completion when
+    ``ctx.deps.wiki_reads`` is missing or empty -- the hook must not
+    regress the common path just because the new field is unset. The
+    existing compaction tests above already cover the full
+    summarization path; this test only pins the fallback behavior.
+    """
+    calls: list[list[object]] = []
+
+    async def model_func(messages, info):
+        calls.append(messages)
+        return _response("## Objective\n- Keep the exact project state.")
+
+    history: list[ModelMessage] = [
+        _request("old user request"),
+        _response("old assistant response"),
+        _request("recent user request"),
+        _response("recent assistant response"),
+    ]
+    capability = AnchoredCompaction(message_count_threshold=4, tail_turns=1)
+    agent = Agent(FunctionModel(model_func), output_type=str, capabilities=[capability])
+
+    result = asyncio.run(agent.run("current request", message_history=history))
+
+    # The compaction still fires; only the outer model was captured.
+    assert len(calls) >= 1
+    assert "agentic_compaction" in str(result.all_messages())

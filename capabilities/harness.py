@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+import yaml
 from pydantic_ai import ModelRetry
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.messages import ToolCallPart
@@ -15,9 +16,15 @@ from pydantic_ai.toolsets.function import FunctionToolset
 from pydantic_core import to_jsonable_python
 
 from conversation import visible_comments
-from deps import AgentDeps
+from deps import AgentDeps, WikiRead
 
 _MENTION_PATTERN = re.compile(r"(?:^|[^\w`])@[A-Za-z0-9._-]+(?=\W|$)")
+
+# Cap on the per-wiki preview that lands in the compaction summary. The
+# preview is meant to remind the agent which page it consulted, not to
+# reproduce the body -- if the page looks relevant again, the agent is
+# expected to re-read it via ``gitea_wiki_read``.
+_WIKI_SUMMARY_MAX_CHARS = 300
 
 
 @dataclass
@@ -56,6 +63,9 @@ class HarnessCapability(AbstractCapability[AgentDeps]):
     ) -> Any:
         if tool_def.name in ("save_memory", "delete_memory"):
             ctx.deps.memory_modified = True
+
+        if tool_def.name == "gitea_wiki_read":
+            self._record_wiki_read(ctx, args, result)
 
         if tool_def.name == "gitea_issue_read" and args.get("method") == "get_comments":
             return self._filter_comment_read_result(ctx, result, args)
@@ -194,3 +204,101 @@ class HarnessCapability(AbstractCapability[AgentDeps]):
             return result
 
         return visible_comments(result, agent_name)
+
+    @staticmethod
+    def _extract_wiki_content(result: Any) -> str | None:
+        """Return the raw markdown body from a ``gitea_wiki_read`` result.
+
+        The MCP tool returns the page either as a plain-text string or as
+        a dict whose ``content`` field holds the body. The dict shape is
+        the one the production MCP server emits; the string shape covers
+        test doubles and direct invocations. ``None`` when no body is
+        available (e.g. an error response).
+        """
+        if isinstance(result, str):
+            return result or None
+        if isinstance(result, dict):
+            content = result.get("content")
+            if isinstance(content, str) and content:
+                return content
+        return None
+
+    @staticmethod
+    def _summarize_wiki_content(content: str, max_chars: int) -> str:
+        """Produce a short preview of a wiki page body.
+
+        Prefers the frontmatter ``description`` when present -- that is a
+        human-curated one-liner the wiki author wrote on purpose -- and
+        falls back to the first ``max_chars`` characters of the body
+        otherwise. Whitespace is normalized so the preview stays on one
+        logical line inside the compaction summary.
+        """
+        description: str | None = None
+        if content.startswith("---"):
+            end = content.find("\n---", 3)
+            if end != -1:
+                fm_text = content[3:end].lstrip("\n")
+                try:
+                    parsed = yaml.safe_load(fm_text)
+                except yaml.YAMLError:
+                    parsed = None
+                if isinstance(parsed, dict):
+                    raw_desc = parsed.get("description")
+                    if isinstance(raw_desc, str) and raw_desc.strip():
+                        description = raw_desc.strip()
+        preview_source = description if description is not None else content
+        preview = re.sub(r"\s+", " ", preview_source).strip()
+        if len(preview) > max_chars:
+            preview = preview[: max_chars - 1].rstrip() + "\u2026"
+        return preview
+
+    @classmethod
+    def _record_wiki_read(
+        cls,
+        ctx: RunContext[AgentDeps],
+        args: dict[str, Any],
+        result: Any,
+    ) -> None:
+        """Append a ``WikiRead`` entry to ``ctx.deps.wiki_reads``.
+
+        Skips the call when the args or result don't carry enough
+        information to attribute the read to a concrete page (e.g.
+        ``method='list'`` -- we only track actual page reads, not
+        enumerations). Re-reading the same page replaces the prior
+        entry so the compaction summary reflects the agent's most
+        recent view of the page.
+        """
+        owner = args.get("owner")
+        repo = args.get("repo")
+        page_name = args.get("pageName")
+        if not (
+            isinstance(owner, str)
+            and isinstance(repo, str)
+            and isinstance(page_name, str)
+            and page_name
+        ):
+            return
+
+        content = cls._extract_wiki_content(result)
+        if content is None:
+            return
+
+        summary = cls._summarize_wiki_content(content, _WIKI_SUMMARY_MAX_CHARS)
+
+        existing_index = next(
+            (
+                index
+                for index, prior in enumerate(ctx.deps.wiki_reads)
+                if prior.owner == owner
+                and prior.repo == repo
+                and prior.page_name == page_name
+            ),
+            None,
+        )
+        new_entry = WikiRead(
+            owner=owner, repo=repo, page_name=page_name, summary=summary
+        )
+        if existing_index is None:
+            ctx.deps.wiki_reads.append(new_entry)
+        else:
+            ctx.deps.wiki_reads[existing_index] = new_entry

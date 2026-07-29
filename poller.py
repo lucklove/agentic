@@ -502,6 +502,12 @@ async def _handle_notification(
                 subject_type=notif_ctx.subject_type,
             ),
             has_mentioned_comments=has_mentioned_comments,
+            # ``wiki_reads`` accumulates ``gitea_wiki_read`` calls via
+            # ``HarnessCapability.after_tool_execute`` during this run.
+            # Reset it so reads from a previous notification don't
+            # bleed into the next summary; the compacted history is
+            # loaded from ``messages_dir`` for this thread only.
+            wiki_reads=[],
         )
         notif_subject = run_deps.notification_subject
         assert notif_subject is not None  # we just set it above

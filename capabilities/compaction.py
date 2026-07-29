@@ -27,6 +27,7 @@ from pydantic_ai.tools import RunContext
 from pydantic_core import to_jsonable_python
 
 from capabilities.privacy import PrivacyCapability
+from deps import WikiRead
 
 __all__ = ["AnchoredCompaction", "OpenAICompaction", "AnthropicCompaction"]
 
@@ -70,6 +71,10 @@ _SUMMARY_TEMPLATE = """Output exactly the Markdown structure shown inside <templ
 
 ## Relevant Files
 - [file or directory path: why it matters, or "(none)"]
+
+## Already-Read Wikis
+- [<owner>/<repo>/<page>: short description of what the page said, or "(none)"]
+- If any of these pages look relevant to the current task, re-read it via `gitea_wiki_read` before relying on it -- the preview above is intentionally brief.
 </template>
 
 Rules:
@@ -252,7 +257,33 @@ class AnchoredCompaction(AbstractCapability[Any]):
                     )
         return "\n\n".join(lines)
 
-    def _build_prompt(self, previous_summary: str | None, history: str) -> str:
+    @staticmethod
+    def _format_wiki_reads(wiki_reads: list[WikiRead]) -> str:
+        """Render the ``<wiki-reads>`` block fed to the summarizer.
+
+        Lists every wiki page observed during the current run, in call
+        order. The summarizer copies these into the ``## Already-Read
+        Wikis`` section of the output (with the same one-line shape the
+        template asks for) so a later turn can decide which pages are
+        still relevant and re-read the chosen ones via
+        ``gitea_wiki_read``.
+        """
+        if not wiki_reads:
+            return "<wiki-reads>\n(none yet)\n</wiki-reads>"
+        lines = ["<wiki-reads>"]
+        for entry in wiki_reads:
+            lines.append(
+                f"- {entry.owner}/{entry.repo}/{entry.page_name}: {entry.summary}"
+            )
+        lines.append("</wiki-reads>")
+        return "\n".join(lines)
+
+    def _build_prompt(
+        self,
+        previous_summary: str | None,
+        history: str,
+        wiki_reads: list[WikiRead],
+    ) -> str:
         anchor = (
             "Update the anchored summary below using the conversation history above.\n"
             "Preserve still-true details, remove stale details, and merge in the new facts.\n"
@@ -260,7 +291,17 @@ class AnchoredCompaction(AbstractCapability[Any]):
             if previous_summary
             else "Create a new anchored summary from the conversation history."
         )
-        return "\n\n".join((history, anchor, _SUMMARY_TEMPLATE))
+        wiki_block = self._format_wiki_reads(wiki_reads)
+        wiki_instructions = (
+            "The <wiki-reads> block lists wiki pages the agent consulted via "
+            "`gitea_wiki_read` so far in this run. Copy each entry into the "
+            "`## Already-Read Wikis` section of your output verbatim, then add "
+            "the re-read hint from the template so later turns know to refresh "
+            "the page if it looks relevant again."
+        )
+        return "\n\n".join(
+            (history, anchor, wiki_block, wiki_instructions, _SUMMARY_TEMPLATE)
+        )
 
     async def before_model_request(
         self,
@@ -294,6 +335,8 @@ class AnchoredCompaction(AbstractCapability[Any]):
         if not transcript:
             return request_context
 
+        wiki_reads = self._wiki_reads_from_ctx(ctx)
+
         summarizer = Agent(
             request_context.model,
             instructions=_SYSTEM_PROMPT,
@@ -302,7 +345,7 @@ class AnchoredCompaction(AbstractCapability[Any]):
         )
         try:
             result = await summarizer.run(
-                self._build_prompt(previous_summary, transcript)
+                self._build_prompt(previous_summary, transcript, wiki_reads)
             )
         except Exception:
             logger.warning("context compaction failed", exc_info=True)
@@ -325,3 +368,20 @@ class AnchoredCompaction(AbstractCapability[Any]):
         )
         request_context.messages = [marker, summary_message, *recent_messages, current]
         return request_context
+
+    @staticmethod
+    def _wiki_reads_from_ctx(ctx: RunContext[Any]) -> list[WikiRead]:
+        """Return the wiki reads tracked on ``ctx.deps`` for this run.
+
+        ``ctx`` is typed ``RunContext[Any]`` here because pydantic-ai's
+        capability protocol is capability-agnostic; the dep type is
+        declared in :func:`agent_factory.make_agent` and is always
+        :class:`AgentDeps` in practice. The narrow guard keeps this
+        capability working in tests that pass a plain ``SimpleNamespace``
+        whose ``deps`` attribute is not an :class:`AgentDeps`.
+        """
+        deps = getattr(ctx, "deps", None)
+        wiki_reads = getattr(deps, "wiki_reads", None)
+        if isinstance(wiki_reads, list):
+            return wiki_reads
+        return []
