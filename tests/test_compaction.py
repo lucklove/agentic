@@ -283,3 +283,65 @@ def test_disabled_anchored_compaction_is_a_noop() -> None:
     assert len(calls) == 1
     assert "old request" in str(calls[0])
     assert "agentic_compaction" not in str(result.all_messages())
+
+
+def test_bundled_tool_turn_keeps_tool_call_pair_on_same_side() -> None:
+    """Regression for issue #271.
+
+    pydantic-ai's ``_merge_consecutive_messages`` (in
+    ``pydantic_ai/_agent_graph.py``) bundles a pending ``ToolReturnPart``
+    with the next ``UserPromptPart`` into a single ``ModelRequest``. With
+    the original ``_is_user_turn`` check, that bundled request counted as
+    a user turn, so the compaction split landed in front of it and the
+    matching ``ModelResponse(tool_call)`` was summarised away — leaving
+    an orphan ``ToolReturnPart`` that the model API rejected with
+    ``tool result's tool id ... not found``. The fix excludes bundled
+    requests from being treated as a user turn, so the split lands on the
+    previous pure user turn and the ``tool_call`` / ``tool_return`` pair
+    stays together on the recent side.
+    """
+    calls: list[list[object]] = []
+
+    async def model_func(messages, info):
+        calls.append(messages)
+        if len(calls) == 1:
+            return _response("## Objective\n- Keep tool pair intact.")
+        return _response("continued")
+
+    bundled_user_follow_up = UserPromptPart("user follow-up after tool")
+    tool_call_response = ModelResponse(
+        [ToolCallPart("read", {"path": "/tmp/x"}, "call-x")]
+    )
+    bundled_request = ModelRequest(
+        [ToolReturnPart("read", "contents", "call-x"), bundled_user_follow_up]
+    )
+    history: list[ModelMessage] = [
+        _request("old user request"),
+        _response("old assistant response"),
+        _request("recent pure user request"),
+        tool_call_response,
+        bundled_request,
+        _response("assistant response after bundle"),
+    ]
+    capability = AnchoredCompaction(message_count_threshold=6, tail_turns=1)
+    agent = Agent(FunctionModel(model_func), output_type=str, capabilities=[capability])
+
+    asyncio.run(agent.run("current request", message_history=history))
+
+    assert len(calls) == 2
+    final = str(calls[1])
+    # Both halves of the tool_call/tool_return pair must survive on the
+    # recent side of the split — otherwise the model API sees an orphan
+    # ToolReturnPart and rejects the request.
+    assert "call-x" in final, (
+        "tool_call(call-x) was summarised away; the split must land on the "
+        "previous pure user turn so it stays paired with its ToolReturnPart"
+    )
+    assert "contents" in final, "bundled ToolReturnPart content must survive"
+    assert (
+        "user follow-up after tool" in final
+    ), "bundled UserPromptPart must remain on the recent side"
+    assert (
+        "recent pure user request" in final
+    ), "the pure user turn that anchors the recent side must survive"
+    assert "old user request" not in final, "old turn must be summarised away"

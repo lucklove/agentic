@@ -180,9 +180,26 @@ class AnchoredCompaction(AbstractCapability[Any]):
 
     @staticmethod
     def _is_user_turn(message: ModelMessage) -> bool:
-        return isinstance(message, ModelRequest) and any(
-            isinstance(part, UserPromptPart) for part in message.parts
+        # A user turn is a ModelRequest that carries a UserPromptPart but no
+        # tool-closure parts (ToolReturnPart / RetryPromptPart). pydantic-ai's
+        # _merge_consecutive_messages (see pydantic_ai/_agent_graph.py) bundles
+        # a pending ToolReturnPart with the next UserPromptPart into a single
+        # ModelRequest; if we count that bundled message as a user turn the
+        # compaction split point falls in front of it and the matching
+        # ModelResponse(tool_call) is summarised away, leaving an orphan
+        # ToolReturnPart that the model API rejects with
+        # "tool result's tool id ... not found". Excluding bundled requests
+        # keeps the tool_call/tool_return pair together on the same side of
+        # the split.
+        if not isinstance(message, ModelRequest):
+            return False
+        has_tool_closure = any(
+            isinstance(part, (ToolReturnPart, RetryPromptPart))
+            for part in message.parts
         )
+        if has_tool_closure:
+            return False
+        return any(isinstance(part, UserPromptPart) for part in message.parts)
 
     def _select(
         self, history: list[ModelMessage]
