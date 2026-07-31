@@ -444,22 +444,9 @@ async def _handle_notification(
     ):
         subject = await notif_ctx.get_subject()
         if _is_closed(subject):
-            logfire.info(
-                "skip notification for closed subject",
-                repo=notif_ctx.repo_full_name,
-                number=notif_ctx.number,
-                gitea_username=deps.gitea_username,
-            )
             await _mark_notification_read(http, notif_ctx)
             return
-        if open_dependencies := await notif_ctx.open_dependencies():
-            logfire.info(
-                "skip notification with open dependencies",
-                repo=notif_ctx.repo_full_name,
-                number=notif_ctx.number,
-                gitea_username=deps.gitea_username,
-                open_dependencies=len(open_dependencies),
-            )
+        if await notif_ctx.open_dependencies():
             await _mark_notification_read(http, notif_ctx)
             return
 
@@ -485,12 +472,6 @@ async def _handle_notification(
         )
 
         if input_message is None:
-            logfire.info(
-                "skip notification unrelated to agent",
-                repo=notif_ctx.repo_full_name,
-                number=notif_ctx.number,
-                gitea_username=deps.gitea_username,
-            )
             return
 
         run_deps = replace(

@@ -1079,45 +1079,6 @@ def test_handle_notification_does_not_auto_post_when_skipped(
     asyncio.run(run())
 
 
-def test_handle_notification_logs_gitea_username_for_skips(
-    deps: AgentDeps,
-) -> None:
-    async def run() -> None:
-        closed_http = FakeHTTP(
-            subject={
-                "state": "closed",
-                "closed_at": "2026-01-01T00:00:00Z",
-                "user": {"login": "human"},
-                "assignees": [{"login": "code_agent"}],
-            }
-        )
-
-        async def open_dependencies(self) -> list[dict[str, object]]:
-            return [{"state": "open", "number": 99}]
-
-        with patch("poller.logfire.info") as info:
-            await _handle_notification(
-                PassingAgent(), closed_http, notification(), deps
-            )
-            with patch(
-                "poller.NotificationContext.open_dependencies", new=open_dependencies
-            ):
-                await _handle_notification(
-                    PassingAgent(), FakeHTTP(), notification(), deps
-                )
-
-        skip_calls = [
-            call
-            for call in info.call_args_list
-            if call.args[0].startswith("skip notification")
-        ]
-        assert len(skip_calls) == 2
-        for call in skip_calls:
-            assert call.kwargs["gitea_username"] == "code_agent"
-
-    asyncio.run(run())
-
-
 def test_handle_notification_checks_open_dependencies_before_relevance(
     deps: AgentDeps,
 ) -> None:
