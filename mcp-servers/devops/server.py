@@ -2,7 +2,7 @@
 # requires-python = ">=3.10"
 # dependencies = [
 #     "httpx>=0.28.1",
-#     "mcp[cli]>=1.26.0,<2.0",
+#     "mcp[cli]==1.2.0",
 # ]
 # ///
 
