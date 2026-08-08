@@ -4,7 +4,7 @@
 #     "beautifulsoup4>=4.13.3",
 #     "httpx>=0.28.1",
 #     "httpcore>=1.0.8",
-#     "mcp[cli]==1.2.0",
+#     "mcp>=2.0.0",
 # ]
 # ///
 
@@ -23,7 +23,7 @@ from typing import List, Optional
 
 import httpx
 from bs4 import BeautifulSoup
-from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.mcpserver import Context, MCPServer
 from pydantic import BaseModel
 
 
@@ -644,8 +644,8 @@ class WebContentFetcher:
             return f"Error: An unexpected error occurred while fetching the webpage ({str(e)})"
 
 
-# Initialize FastMCP server
-mcp = FastMCP("ddg-search", log_level="CRITICAL")
+# Initialize MCPServer
+mcp = MCPServer("ddg-search", log_level="CRITICAL")
 
 # Silence noisy loggers in the server process. The MCP transport (stdout
 # JSON-RPC) cannot tolerate stray log lines.
@@ -841,12 +841,23 @@ def main():
     elif transports.issubset({"sse", "streamable-http"}):
         host = args.host or "127.0.0.1"
         port = args.port or 8000
-        mcp.settings.host = host
-        mcp.settings.port = port
+        sse_path = "/sse"
+        message_path = "/messages/"
+        streamable_http_path = "/mcp"
 
         # SSE and Streamable HTTP app setup
-        sse_app = mcp.sse_app()
-        http_app = mcp.streamable_http_app()
+        sse_app = (
+            mcp.sse_app(sse_path=sse_path, message_path=message_path, host=host)
+            if "sse" in transports
+            else None
+        )
+        http_app = (
+            mcp.streamable_http_app(
+                streamable_http_path=streamable_http_path, host=host
+            )
+            if "streamable-http" in transports
+            else None
+        )
 
         # Create combined routes with proper deduplication
         combined_routes: list[BaseRoute] = []
@@ -856,11 +867,10 @@ def main():
             methods = tuple(sorted(route.methods or ["GET"]))
             return (route.path, methods)
 
-        for app_routes in [
-            sse_app.routes if "sse" in transports else [],
-            http_app.routes if "streamable-http" in transports else [],
-        ]:
-            for route in app_routes:
+        for source_app in (sse_app, http_app):
+            if source_app is None:
+                continue
+            for route in source_app.routes:
                 if isinstance(route, Route):
                     key = _route_key(route)
                     if key not in added_routes:
@@ -870,10 +880,12 @@ def main():
                     combined_routes.append(route)
 
         # Combine lifespan contexts when both transports are active
-        sse_lifespan = sse_app.router.lifespan_context
-        http_lifespan = http_app.router.lifespan_context
+        sse_lifespan = sse_app.router.lifespan_context if sse_app is not None else None
+        http_lifespan = (
+            http_app.router.lifespan_context if http_app is not None else None
+        )
 
-        if "streamable-http" in transports and "sse" in transports:
+        if sse_lifespan is not None and http_lifespan is not None:
             from contextlib import asynccontextmanager
 
             @asynccontextmanager
@@ -883,7 +895,7 @@ def main():
                         yield
 
             lifespan = _combined_lifespan
-        elif "streamable-http" in transports:
+        elif http_lifespan is not None:
             lifespan = http_lifespan
         else:
             lifespan = sse_lifespan
@@ -903,10 +915,10 @@ def main():
             f"Starting DuckDuckGo MCP Server with {' and '.join(transports)} transport"
         )
         if "sse" in transports:
-            print(f"SSE endpoint: http://{host}:{port}{mcp.settings.sse_path}")
+            print(f"SSE endpoint: http://{host}:{port}{sse_path}")
         if "streamable-http" in transports:
             print(
-                f"Streamable HTTP endpoint: http://{host}:{port}{mcp.settings.streamable_http_path}"
+                f"Streamable HTTP endpoint: http://{host}:{port}{streamable_http_path}"
             )
 
         uvicorn.run(app, host=host, port=port)

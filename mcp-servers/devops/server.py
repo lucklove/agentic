@@ -2,7 +2,7 @@
 # requires-python = ">=3.10"
 # dependencies = [
 #     "httpx>=0.28.1",
-#     "mcp[cli]==1.2.0",
+#     "mcp>=2.0.0",
 # ]
 # ///
 
@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Literal, TypedDict
 
 import httpx
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 TERMINAL_PHASES = frozenset({"created", "expired", "notapproved", "canceled"})
 ENVIRONMENTS = {
@@ -180,7 +180,7 @@ class UserProfile(TypedDict):
     userEmail: str
 
 
-mcp = FastMCP("devops-jump", log_level="CRITICAL")
+mcp = MCPServer("devops-jump", log_level="CRITICAL")
 
 
 @mcp.tool()
@@ -394,9 +394,7 @@ def main() -> None:
         mcp.run(transport="stdio")
         return
 
-    mcp.settings.host = args.host
-    mcp.settings.port = args.port
-    mcp.run(transport=args.transport)
+    mcp.run(transport=args.transport, host=args.host, port=args.port)
 
 
 if __name__ == "__main__":
