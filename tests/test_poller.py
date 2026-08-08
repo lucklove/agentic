@@ -581,6 +581,58 @@ def test_handle_notification_keeps_mentioned_context_false_for_chat_only(
     asyncio.run(run())
 
 
+def test_handle_notification_strips_all_markers_for_multi_agent_dispatch(
+    deps: AgentDeps,
+) -> None:
+    """Regression for agentic/agentic#279.
+
+    A comment may carry one marker per agent the human is dispatching to
+    (e.g. both ``code_agent`` and ``review_agent`` on a single human
+    message). The poller routes the comment to every agent whose marker
+    is present, but each agent must receive only the visible body — not
+    the other agent's dispatching marker, and not even its own.
+
+    Previously ``_chat_messages_after`` only scrubbed the marker matching
+    the current agent, leaving the *other* agents' markers in place. The
+    delivered prompt therefore leaked
+    ``<!-- agentic:@<other_agent> last_seen_comment_id=... -->`` to the
+    model, which then acted on (or re-mentioned) the wrong agent.
+    """
+    multi_agent_body = (
+        "<!-- agentic:@code_agent last_seen_comment_id=0 -->\n\n"
+        "<!-- agentic:@review_agent last_seen_comment_id=0 -->\n\n"
+        "please coordinate on the multi-agent bug"
+    )
+
+    async def run() -> None:
+        http = FakeHTTP(
+            subject={
+                "state": "open",
+                "closed_at": None,
+                "user": {"login": "human"},
+                "assignees": [],
+            },
+            comments=[
+                {
+                    "id": 1,
+                    "body": multi_agent_body,
+                    "user": {"login": "human"},
+                }
+            ],
+        )
+        agent = PassingAgent()
+
+        await _handle_notification(agent, http, notification(), deps)
+
+        assert agent.run_message is not None
+        # The delivered prompt must contain only the human-visible body;
+        # no markers for either code_agent or review_agent.
+        assert agent.run_message == "please coordinate on the multi-agent bug"
+        assert "<!-- agentic:@" not in agent.run_message
+
+    asyncio.run(run())
+
+
 def test_handle_notification_ignores_backtick_wrapped_mentions(
     deps: AgentDeps,
 ) -> None:

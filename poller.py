@@ -47,13 +47,14 @@ from pydantic_ai.usage import UsageLimits
 from tenacity import RetryCallState, retry_if_exception_type, wait_exponential
 
 from conversation import (
+    ANY_AGENT_MARKER_PATTERN,
     close_pending_tool_calls,
     is_conversation_comment,
     last_seen_comment_id_from_marker,
     load_history,
     marker_for,
     save_history,
-    strip_conversation_marker,
+    strip_all_conversation_markers,
     subject_message_key,
 )
 from deps import AgentDeps, NotificationSubject
@@ -73,10 +74,8 @@ _MENTION_PATTERN = re.compile(r"(?:^|[^\w`])@([A-Za-z0-9._-]+)(?=\W|$)")
 # ``_post_agent_response``), not the target.  When another agent @-mentions
 # us inside its own conversation response, we must not treat that as a fresh
 # mention notification, or agents start @-mentioning each other back and
-# forth in a ping-pong loop (issue #225).
-_ANY_AGENT_MARKER_PATTERN = re.compile(
-    r"<!--\s*agentic:@[A-Za-z0-9._-]+\s+last_seen_comment_id=\d+\s*-->"
-)
+# forth in a ping-pong loop (issue #225). The pattern itself lives in
+# :mod:`conversation` so the marker convention stays in one module.
 
 
 def _agent_run_usage_limits(request_limit: int) -> UsageLimits:
@@ -183,7 +182,7 @@ def _chat_messages_after(
     agent_name: str,
 ) -> list[str]:
     return [
-        strip_conversation_marker(comment.get("body", ""), agent_name)
+        strip_all_conversation_markers(comment.get("body", ""))
         for comment in _comments_after(comments, last_seen_comment_id)
         if _comment_author(comment) != agent_name
         and is_conversation_comment(comment.get("body", ""), agent_name)
@@ -198,7 +197,7 @@ def _mentioned_comments_after(
     return [
         comment
         for comment in _comments_after(comments, last_seen_comment_id)
-        if not _ANY_AGENT_MARKER_PATTERN.search(comment.get("body", "") or "")
+        if not ANY_AGENT_MARKER_PATTERN.search(comment.get("body", "") or "")
         and _mentions_agent(comment, agent_name)
     ]
 

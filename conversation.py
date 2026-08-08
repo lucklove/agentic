@@ -32,9 +32,10 @@ from pydantic_ai.messages import (
 
 __all__ = [
     "marker_for",
+    "ANY_AGENT_MARKER_PATTERN",
     "is_conversation_comment",
     "last_seen_comment_id_from_marker",
-    "strip_conversation_marker",
+    "strip_all_conversation_markers",
     "visible_comments",
     "subject_message_key",
     "load_history",
@@ -44,6 +45,14 @@ __all__ = [
 
 _MARKER_TEMPLATE = (
     "<!-- agentic:@{agent_name} last_seen_comment_id={last_seen_comment_id} -->"
+)
+
+# Matches *any* agent's conversation marker. Used by ``poller`` to detect
+# comments authored by another agent (issue #225) and by
+# ``strip_all_conversation_markers`` to scrub every marker from a body before
+# delivering it as a chat message (issue #279).
+ANY_AGENT_MARKER_PATTERN = re.compile(
+    r"<!--\s*agentic:@[A-Za-z0-9._-]+\s+last_seen_comment_id=\d+\s*-->"
 )
 
 logger = logging.getLogger(__name__)
@@ -87,9 +96,18 @@ def last_seen_comment_id_from_marker(body: str, agent_name: str) -> int | None:
     return int(match.group(1))
 
 
-def strip_conversation_marker(body: str, agent_name: str) -> str:
-    """Remove the current agent's leading conversation marker from *body*."""
-    return _marker_pattern(agent_name).sub("", body or "", count=1).lstrip()
+def strip_all_conversation_markers(body: str) -> str:
+    """Remove every ``<!-- agentic:@<agent-name> last_seen_comment_id=<n> -->`` marker.
+
+    A single comment can carry markers for several agents when a human or
+    another agent wants to dispatch the same payload to multiple agents at
+    once (agentic/agentic#279). The poller routes such comments to every
+    agent whose marker is present; each delivered message must contain
+    only the human-visible body, not the dispatching markers. Markers are
+    internal coordination signals and never belong in the prompt, no
+    matter whose marker they are.
+    """
+    return ANY_AGENT_MARKER_PATTERN.sub("", body or "").strip()
 
 
 def visible_comments(

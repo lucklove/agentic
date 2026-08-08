@@ -20,7 +20,7 @@ from conversation import (
     load_history,
     marker_for,
     save_history,
-    strip_conversation_marker,
+    strip_all_conversation_markers,
     subject_message_key,
     visible_comments,
 )
@@ -74,14 +74,51 @@ def test_is_conversation_comment_empty_body() -> None:
     assert is_conversation_comment("", "code_agent") is False
 
 
-def test_strip_conversation_marker() -> None:
-    body = "<!-- agentic:@code_agent last_seen_comment_id=12 -->\n\nPlease continue."
-    assert strip_conversation_marker(body, "code_agent") == "Please continue."
+def test_strip_all_conversation_markers_removes_every_marker() -> None:
+    """Regression for agentic/agentic#279.
+
+    A comment may carry one marker per dispatch target (one per agent the
+    message is addressed to). Each agent must receive only the visible
+    body — none of the dispatching markers, including its own.
+    """
+    body = (
+        "<!-- agentic:@code_agent last_seen_comment_id=0 -->\n\n"
+        "<!-- agentic:@review_agent last_seen_comment_id=0 -->\n\n"
+        "please coordinate"
+    )
+    assert strip_all_conversation_markers(body) == "please coordinate"
 
 
-def test_strip_conversation_marker_no_match_returns_body() -> None:
-    body = "Regular comment"
-    assert strip_conversation_marker(body, "code_agent") == body
+def test_strip_all_conversation_markers_handles_markers_mid_body() -> None:
+    """Markers can appear anywhere in a body; all occurrences are scrubbed.
+
+    The helper focuses on removing the markers themselves, not on
+    de-duplicating the newlines that surround each marker; the assertion
+    is that every marker is gone and the human-visible prose is preserved
+    in order.
+    """
+    body = (
+        "prefix\n\n"
+        "<!-- agentic:@code_agent last_seen_comment_id=4 -->\n\n"
+        "middle\n\n"
+        "<!-- agentic:@review_agent last_seen_comment_id=5 -->\n\n"
+        "suffix"
+    )
+    result = strip_all_conversation_markers(body)
+    assert "<!-- agentic:@" not in result
+    assert "prefix" in result
+    assert "middle" in result
+    assert "suffix" in result
+    assert result.index("prefix") < result.index("middle") < result.index("suffix")
+
+
+def test_strip_all_conversation_markers_no_marker_returns_body_stripped() -> None:
+    body = "  no markers here  "
+    assert strip_all_conversation_markers(body) == "no markers here"
+
+
+def test_strip_all_conversation_markers_empty_body() -> None:
+    assert strip_all_conversation_markers("") == ""
 
 
 def test_visible_comments_filters_conversation() -> None:
