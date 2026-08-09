@@ -266,7 +266,16 @@ def test_after_tool_execute_passes_through_non_comment_method() -> None:
     assert output == result
 
 
-def test_after_tool_execute_preserves_different_agent_marker() -> None:
+def test_after_tool_execute_filters_any_agent_marker() -> None:
+    """The harness filter strips any conversation marker, not just the current agent's.
+
+    Regression pin for agentic/agentic#282. Before #282,
+    ``HarnessCapability.after_tool_execute`` only hid comments carrying the
+    *current* agent's marker when ``gitea_issue_read`` returned the
+    notification subject's comment thread. After #282, the filter is
+    recipient-agnostic: a ``@review_agent`` marker on a thread fetched by
+    ``code_agent`` is no longer leaked into the chat stream.
+    """
     cap = HarnessCapability()
     ctx = SimpleNamespace(
         deps=AgentDeps(
@@ -295,6 +304,7 @@ def test_after_tool_execute_preserves_different_agent_marker() -> None:
             "body": "<!-- agentic:@review_agent last_seen_comment_id=0 -->\n\nLGTM",
             "user": {"login": "review_agent"},
         },
+        {"id": 2, "body": "Plain context comment", "user": {"login": "human"}},
     ]
 
     filtered = asyncio.run(
@@ -304,6 +314,7 @@ def test_after_tool_execute_preserves_different_agent_marker() -> None:
     )
 
     assert len(filtered) == 1
+    assert filtered[0]["id"] == 2
 
 
 def test_after_tool_execute_skips_filter_when_no_notification_subject() -> None:

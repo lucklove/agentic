@@ -49,7 +49,7 @@ from tenacity import RetryCallState, retry_if_exception_type, wait_exponential
 from conversation import (
     ANY_AGENT_MARKER_PATTERN,
     close_pending_tool_calls,
-    is_conversation_comment,
+    is_conversation_comment_for,
     last_seen_comment_id_from_marker,
     load_history,
     marker_for,
@@ -185,7 +185,7 @@ def _chat_messages_after(
         strip_all_conversation_markers(comment.get("body", ""))
         for comment in _comments_after(comments, last_seen_comment_id)
         if _comment_author(comment) != agent_name
-        and is_conversation_comment(comment.get("body", ""), agent_name)
+        and is_conversation_comment_for(comment.get("body", ""), agent_name)
     ]
 
 
@@ -224,7 +224,7 @@ def _build_input_message(
             _comment_id(comment)
             for comment in _comments_after(comments, last_seen_comment_id)
             if _comment_author(comment) != agent_name
-            and is_conversation_comment(comment.get("body", ""), agent_name)
+            and is_conversation_comment_for(comment.get("body", ""), agent_name)
         )
 
     if mentioned_comments:

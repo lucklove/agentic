@@ -33,6 +33,7 @@ from pydantic_ai.messages import (
 __all__ = [
     "marker_for",
     "ANY_AGENT_MARKER_PATTERN",
+    "is_conversation_comment_for",
     "is_conversation_comment",
     "last_seen_comment_id_from_marker",
     "strip_all_conversation_markers",
@@ -83,9 +84,33 @@ def _marker_pattern(agent_name: str) -> re.Pattern[str]:
     )
 
 
-def is_conversation_comment(body: str, agent_name: str) -> bool:
-    """Return ``True`` if *body* contains the conversation marker for *agent_name*."""
+def is_conversation_comment_for(body: str, agent_name: str) -> bool:
+    """Return ``True`` if *body* contains the conversation marker for *agent_name*.
+
+    This answers the per-agent delivery question: *is ``agent_name`` one of
+    the recipients of this comment?* Use this when deciding whether to
+    dispatch a comment to a specific agent (e.g. :mod:`poller`'s
+    ``_chat_messages_after`` and ``_build_input_message`` filter paths).
+
+    For the recipient-agnostic counterpart — *is this comment a piece of
+    conversation traffic at all?* — see :func:`is_conversation_comment`.
+    """
     return _marker_pattern(agent_name).search(body or "") is not None
+
+
+def is_conversation_comment(body: str) -> bool:
+    """Return ``True`` if *body* carries any conversation marker.
+
+    This is the recipient-agnostic counterpart of
+    :func:`is_conversation_comment_for`: a comment is considered
+    conversation-tagged when its body contains any
+    ``<!-- agentic:@<agent> last_seen_comment_id=<n> -->`` marker,
+    regardless of which agent the marker names. Use this for *filtering*
+    decisions (e.g. dropping conversation traffic from a visible-comments
+    stream — see :func:`visible_comments` and agentic/agentic#282). For
+    per-agent delivery decisions, use the ``_for`` variant.
+    """
+    return ANY_AGENT_MARKER_PATTERN.search(body or "") is not None
 
 
 def last_seen_comment_id_from_marker(body: str, agent_name: str) -> int | None:
@@ -114,17 +139,20 @@ def visible_comments(
     comments: list[dict[str, Any]],
     agent_name: str,
 ) -> list[dict[str, Any]]:
-    """Filter out conversation-type comments for *agent_name*.
+    """Filter out every conversation-tagged comment, regardless of recipient agent.
 
-    A comment is considered conversation-type if its ``body`` contains the
-    current agent's marker. Both agent-authored and human-authored comments
-    that reference the marker are excluded.
+    A comment is considered conversation-tagged when its ``body`` carries any
+    ``<!-- agentic:@<agent> last_seen_comment_id=<n> -->`` marker, not just
+    one addressed to *agent_name*. Both agent-authored and human-authored
+    comments are excluded, irrespective of who the dispatcher routed the
+    comment to (see agentic/agentic#282).
+
+    The *agent_name* argument is retained for backwards compatibility with
+    the pre-#282 call sites in :mod:`capabilities.harness`; it is
+    intentionally ignored by the filtering predicate.
     """
-    return [
-        c
-        for c in comments
-        if not is_conversation_comment(c.get("body", ""), agent_name)
-    ]
+    del agent_name
+    return [c for c in comments if not is_conversation_comment(c.get("body", ""))]
 
 
 def subject_message_key(

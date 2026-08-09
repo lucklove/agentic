@@ -16,6 +16,7 @@ from pydantic_ai.messages import (
 from conversation import (
     close_pending_tool_calls,
     is_conversation_comment,
+    is_conversation_comment_for,
     last_seen_comment_id_from_marker,
     load_history,
     marker_for,
@@ -38,24 +39,24 @@ def test_marker_for_special_characters() -> None:
     )
 
 
-def test_is_conversation_comment_true() -> None:
+def test_is_conversation_comment_for_true() -> None:
     body = "<!-- agentic:@code_agent last_seen_comment_id=12 -->\n\nI fixed the bug."
-    assert is_conversation_comment(body, "code_agent") is True
+    assert is_conversation_comment_for(body, "code_agent") is True
 
 
-def test_old_marker_is_not_conversation_comment() -> None:
+def test_is_conversation_comment_for_old_marker_false() -> None:
     body = "<!-- agentic:@code_agent -->\n\nI fixed the bug."
-    assert is_conversation_comment(body, "code_agent") is False
+    assert is_conversation_comment_for(body, "code_agent") is False
 
 
-def test_is_conversation_comment_false_no_marker() -> None:
+def test_is_conversation_comment_for_false_no_marker() -> None:
     body = "This is a regular comment."
-    assert is_conversation_comment(body, "code_agent") is False
+    assert is_conversation_comment_for(body, "code_agent") is False
 
 
-def test_is_conversation_comment_false_different_agent() -> None:
+def test_is_conversation_comment_for_false_different_agent() -> None:
     body = "<!-- agentic:@review_agent last_seen_comment_id=12 -->\n\nLGTM"
-    assert is_conversation_comment(body, "code_agent") is False
+    assert is_conversation_comment_for(body, "code_agent") is False
 
 
 def test_last_seen_comment_id_from_marker() -> None:
@@ -70,8 +71,44 @@ def test_last_seen_comment_id_from_marker_missing() -> None:
     )
 
 
+def test_is_conversation_comment_for_empty_body() -> None:
+    assert is_conversation_comment_for("", "code_agent") is False
+
+
+def test_is_conversation_comment_true_for_any_marker() -> None:
+    """The bare helper is recipient-agnostic — any agent's marker counts.
+
+    Regression pin for agentic/agentic#282: the visible-comments filter
+    relies on this helper to detect *conversation traffic at all*,
+    regardless of which agent the marker names.
+    """
+    body = "<!-- agentic:@review_agent last_seen_comment_id=12 -->\n\nLGTM"
+    assert is_conversation_comment(body) is True
+
+
+def test_is_conversation_comment_true_for_multi_marker_dispatch() -> None:
+    """A single comment may carry markers for several agents (see #279)."""
+    body = (
+        "<!-- agentic:@ops_agent last_seen_comment_id=4 -->\n\n"
+        "<!-- agentic:@review_agent last_seen_comment_id=5 -->\n\n"
+        "human dispatch"
+    )
+    assert is_conversation_comment(body) is True
+
+
+def test_is_conversation_comment_false_no_marker() -> None:
+    body = "This is a regular comment."
+    assert is_conversation_comment(body) is False
+
+
+def test_is_conversation_comment_false_old_marker() -> None:
+    """A bare ``<!-- agentic:@<agent> -->`` without ``last_seen_comment_id`` is NOT a marker."""
+    body = "<!-- agentic:@code_agent -->\n\nI fixed the bug."
+    assert is_conversation_comment(body) is False
+
+
 def test_is_conversation_comment_empty_body() -> None:
-    assert is_conversation_comment("", "code_agent") is False
+    assert is_conversation_comment("") is False
 
 
 def test_strip_all_conversation_markers_removes_every_marker() -> None:
@@ -140,13 +177,47 @@ def test_visible_comments_filters_conversation() -> None:
     assert result[1]["body"] == "Another regular comment"
 
 
-def test_visible_comments_keeps_different_agent_marker() -> None:
+def test_visible_comments_filters_any_agent_marker() -> None:
+    """Any conversation marker excludes the comment, even when addressed to another agent.
+
+    Regression pin for agentic/agentic#282. Prior to #282, this method only
+    filtered out markers addressed to the current agent; comments carrying a
+    foreign agent marker were kept in the agent's visible-comments stream,
+    leaking conversation-style payloads into the chat. The fix is to treat
+    every marker -- regardless of recipient -- as conversation traffic.
+    """
     comments = [
         {"body": "<!-- agentic:@review_agent last_seen_comment_id=12 -->\n\nLGTM"},
         {"body": "Regular comment"},
+        {
+            "body": (
+                "<!-- agentic:@ops_agent last_seen_comment_id=4 -->\n\n"
+                "<!-- agentic:@review_agent last_seen_comment_id=5 -->\n\n"
+                "human dispatch"
+            ),
+            "user": {"login": "human"},
+        },
+        {"body": "<!-- agentic:@debug_agent last_seen_comment_id=1 -->"},
     ]
     result = visible_comments(comments, "code_agent")
-    assert len(result) == 2
+    assert len(result) == 1
+    assert result[0]["body"] == "Regular comment"
+
+
+def test_visible_comments_ignores_agent_name_argument() -> None:
+    """The *agent_name* argument is now a back-compat no-op (see #282).
+
+    A foreign-agent marker must always be filtered, even when ``agent_name``
+    is a third name that does not appear in any marker. This pins the
+    documented behavior so a future refactor that re-introduces agent-name
+    coupling will fail loudly.
+    """
+    comments = [
+        {"body": "<!-- agentic:@review_agent last_seen_comment_id=12 -->\n\nLGTM"},
+        {"body": "context"},
+    ]
+    assert visible_comments(comments, "ops_agent") == [{"body": "context"}]
+    assert visible_comments(comments, "") == [{"body": "context"}]
 
 
 def test_visible_comments_empty_list() -> None:
