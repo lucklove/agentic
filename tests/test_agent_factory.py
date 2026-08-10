@@ -213,6 +213,42 @@ def test_make_agent_passes_model_settings() -> None:
     assert kwargs["model_settings"] == ModelSettings(thinking="high")
 
 
+def test_make_agent_raises_tool_retries_to_match_output_retries() -> None:
+    """`Agent(retries=...)` budgets `tools` (per-tool retry cap) and
+    `output` (output-validation retry cap) separately. pydantic-ai's
+    default for `tools` is 1, which makes a top-level injected tool call
+    (e.g. `read_file` outside `run_code`) raise
+    `UnexpectedModelBehavior: Tool 'xxx' exceeded max retries count of 1`
+    after a single failed attempt and abort the agent. We set
+    `tools=10` so the model has enough attempts to recover from a
+    top-level injected tool call before the agent aborts.
+    Regression test for issue #284.
+    """
+    from pydantic_ai import AgentRetries
+
+    from agent_factory import make_agent
+
+    global_cfg = GlobalConfig(
+        gitea=GiteaGlobalConfig(base_url="http://gitea.example", mcp_command=[]),
+    )
+    profile = ProfileConfig(
+        model="openai-responses:gpt-5.5",
+        model_settings={},
+        gitea=GiteaProfileConfig(token="token"),
+        instructions="test",
+    )
+
+    working_dir = Path(".")
+
+    with patch("agent_factory.Agent") as agent_cls, patch(
+        "agent_factory.build_model", return_value="model"
+    ):
+        make_agent(profile, global_cfg, working_dir, _deps())
+
+    kwargs = agent_cls.call_args.kwargs
+    assert kwargs["retries"] == AgentRetries(output=3, tools=10)
+
+
 def test_make_agent_appends_global_instructions_after_profile() -> None:
     from agent_factory import make_agent
 

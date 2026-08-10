@@ -184,5 +184,5 @@ def make_agent(
         deps_type=AgentDeps,
         capabilities=capabilities,
         instructions=instructions,
-        retries=AgentRetries(output=3),
+        retries=AgentRetries(output=3, tools=10),
     )
