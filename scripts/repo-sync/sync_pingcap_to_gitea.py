@@ -3,7 +3,7 @@
 # requires-python = ">=3.14"
 # dependencies = ["pyyaml>=6.0"]
 # ///
-"""Clone from Gitea, add GitHub as upstream, and force-push to Gitea for repo-sync."""
+"""Clone from Gitea.ai, add PingCAP as upstream, and force-push to Gitea.ai for repo-sync."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 import yaml
 
 CREDENTIAL_URL_RE = re.compile(r"(https?://)[^\s/@]+@")
-GITHUB_REMOTE_NAME = "upstream"
+PINGCAP_REMOTE_NAME = "upstream"
 ROOT_DIR = Path(__file__).resolve().parents[3]
 DEFAULT_GLOBAL_CONFIG = Path.home() / ".agentic" / "agentic.yaml"
 DEFAULT_AGENTIC_DIR = Path.home() / ".agentic"
@@ -91,8 +91,8 @@ def capture(command: list[str]) -> str:
     return result.stdout
 
 
-def build_github_ssh_url(github_owner: str, repo: str) -> str:
-    return f"git@github.com:{github_owner}/{repo}.git"
+def build_pingcap_ssh_url(pingcap_owner: str, repo: str) -> str:
+    return f"git@git.pingcap.net:{pingcap_owner}/{repo}.git"
 
 
 def load_yaml(path: Path) -> dict[str, object]:
@@ -147,14 +147,14 @@ def discover_gitea_url(
 def gitea_api_repo_url(gitea_url: str, gitea_owner: str, repo: str) -> str:
     parts = urlsplit(gitea_url)
     if parts.scheme not in {"http", "https"} or not parts.netloc:
-        raise SystemExit(f"invalid Gitea repository URL: {gitea_url}")
+        raise SystemExit(f"invalid Gitea.ai repository URL: {gitea_url}")
     host = parts.hostname or parts.netloc.rsplit("@", 1)[-1]
     if parts.port is not None and ":" not in host:
         host = f"{host}:{parts.port}"
     expected_repo_path = f"/{gitea_owner}/{repo}.git"
     repo_path = parts.path.rstrip("/")
     if not repo_path.endswith(expected_repo_path):
-        raise SystemExit(f"invalid Gitea repository URL: {gitea_url}")
+        raise SystemExit(f"invalid Gitea.ai repository URL: {gitea_url}")
     install_prefix = repo_path[: -len(expected_repo_path)]
     path = (
         f"{install_prefix}/api/v1/repos/{quote(gitea_owner)}/{quote(repo)}/pulls"
@@ -194,36 +194,36 @@ def assert_no_open_gitea_prs(
             payload = json.load(response)
     except urllib.error.HTTPError as exc:
         raise SystemExit(
-            f"failed to query open Gitea pull requests ({exc.code}): {api_url}"
+            f"failed to query open Gitea.ai pull requests ({exc.code}): {api_url}"
         ) from exc
     except urllib.error.URLError as exc:
         raise SystemExit(
-            f"failed to query open Gitea pull requests: {exc.reason}"
+            f"failed to query open Gitea.ai pull requests: {exc.reason}"
         ) from exc
     if not isinstance(payload, list):
         raise SystemExit(
-            f"unexpected Gitea API response when listing pull requests: {api_url}"
+            f"unexpected Gitea.ai API response when listing pull requests: {api_url}"
         )
     if payload:
         raise SystemExit(
-            "refusing GitHub→Gitea sync because the Gitea repository has open pull requests"
+            "refusing PingCAP to Gitea.ai sync because the Gitea.ai repository has open pull requests"
         )
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Clone from Gitea, add GitHub as upstream, and force-push to Gitea.",
+        description="Clone from Gitea.ai, add PingCAP as upstream, and force-push to Gitea.ai.",
     )
     parser.add_argument("--repo-dir", required=True, type=Path)
     parser.add_argument("--gitea-owner", required=True)
     parser.add_argument("--repo", required=True)
     parser.add_argument("--profile", default="ops_agent")
-    parser.add_argument("--github-owner", default="tidbcloud")
+    parser.add_argument("--pingcap-owner", default="tidbcloud")
     parser.add_argument("--gitea-url")
     parser.add_argument("--main-branch", default="main")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    args.github_url = build_github_ssh_url(args.github_owner, args.repo)
+    args.pingcap_url = build_pingcap_ssh_url(args.pingcap_owner, args.repo)
     if not args.gitea_url:
         args.gitea_url = discover_gitea_url(args.gitea_owner, args.repo, args.profile)
     return args
@@ -232,12 +232,12 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     assert_no_open_gitea_prs(args.gitea_owner, args.repo, args.gitea_url, args.profile)
-    # Clone from the local Gitea mirror (much faster than SSH-cloning GitHub).
+    # Clone from the local Gitea.ai mirror (much faster than SSH-cloning PingCAP).
     run(
         ["git", "clone", args.gitea_url, str(args.repo_dir)],
         dry_run=args.dry_run,
     )
-    # Add GitHub as a temporary upstream so we can fetch its main branch.
+    # Add PingCAP as a temporary upstream so we can fetch its main branch.
     run(
         [
             "git",
@@ -245,12 +245,12 @@ def main() -> None:
             str(args.repo_dir),
             "remote",
             "add",
-            GITHUB_REMOTE_NAME,
-            args.github_url,
+            PINGCAP_REMOTE_NAME,
+            args.pingcap_url,
         ],
         dry_run=args.dry_run,
     )
-    # Fetch GitHub main into a named remote-tracking ref so the working tree
+    # Fetch PingCAP main into a named remote-tracking ref so the working tree
     # is not disturbed by the fetch; this is what we will force-push.
     run(
         [
@@ -258,12 +258,12 @@ def main() -> None:
             "-C",
             str(args.repo_dir),
             "fetch",
-            GITHUB_REMOTE_NAME,
-            f"{args.main_branch}:refs/remotes/{GITHUB_REMOTE_NAME}/{args.main_branch}",
+            PINGCAP_REMOTE_NAME,
+            f"{args.main_branch}:refs/remotes/{PINGCAP_REMOTE_NAME}/{args.main_branch}",
         ],
         dry_run=args.dry_run,
     )
-    # Force-push the GitHub-fetched tip to Gitea main, independent of local HEAD.
+    # Force-push the PingCAP-fetched tip to Gitea.ai main, independent of local HEAD.
     run(
         [
             "git",
@@ -272,7 +272,7 @@ def main() -> None:
             "push",
             "--force",
             args.gitea_url,
-            f"{GITHUB_REMOTE_NAME}/{args.main_branch}:refs/heads/{args.main_branch}",
+            f"{PINGCAP_REMOTE_NAME}/{args.main_branch}:refs/heads/{args.main_branch}",
         ],
         dry_run=args.dry_run,
     )
@@ -284,14 +284,14 @@ def main() -> None:
             str(args.repo_dir),
             "remote",
             "remove",
-            GITHUB_REMOTE_NAME,
+            PINGCAP_REMOTE_NAME,
         ],
         dry_run=args.dry_run,
     )
     if args.dry_run:
-        print("dry-run: GitHub to Gitea sync not executed")
+        print("dry-run: PingCAP to Gitea.ai sync not executed")
     else:
-        print(f"synced {args.main_branch} from GitHub to Gitea")
+        print(f"synced {args.main_branch} from PingCAP to Gitea.ai")
 
 
 if __name__ == "__main__":

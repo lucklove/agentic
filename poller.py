@@ -36,12 +36,16 @@ from dataclasses import dataclass, replace
 from string import Template
 from typing import Any
 
-import httpx
+import httpx2
 import logfire
 from pydantic_ai import Agent
 from pydantic_ai._agent_graph import End
 from pydantic_ai.messages import ModelMessage
-from pydantic_ai.retries import AsyncTenacityTransport, RetryConfig, wait_retry_after
+from pydantic_ai.retries import (
+    AsyncHTTPX2TenacityTransport,
+    RetryConfig,
+    wait_retry_after,
+)
 from pydantic_ai.run import AgentRunResult
 from pydantic_ai.usage import UsageLimits
 from tenacity import RetryCallState, retry_if_exception_type, wait_exponential
@@ -255,7 +259,7 @@ def _notification_span_name(
 class NotificationContext:
     """Gitea notification plus API helpers for its issue/PR subject."""
 
-    http: httpx.AsyncClient
+    http: httpx2.AsyncClient
     notif: dict[str, Any]
 
     @property
@@ -328,7 +332,7 @@ class NotificationContext:
 
 
 async def _mark_notification_read(
-    http: httpx.AsyncClient,
+    http: httpx2.AsyncClient,
     notif_ctx: NotificationContext,
 ) -> None:
     await http.patch(f"/api/v1/notifications/threads/{notif_ctx.id}")
@@ -406,7 +410,7 @@ async def _run_agent_iter(
 
 async def _handle_notification(
     agent: Agent[AgentDeps, str],
-    http: httpx.AsyncClient,
+    http: httpx2.AsyncClient,
     notif: dict[str, Any],
     deps: AgentDeps,
     request_limit: int = DEFAULT_AGENT_REQUEST_LIMIT,
@@ -543,7 +547,7 @@ async def _handle_notification(
 
 async def poll_once(
     agent: Agent[AgentDeps, str],
-    http: httpx.AsyncClient,
+    http: httpx2.AsyncClient,
     deps: AgentDeps,
     request_limit: int = DEFAULT_AGENT_REQUEST_LIMIT,
 ) -> None:
@@ -560,7 +564,7 @@ async def poll_once(
         )
 
 
-def _validate_retryable_gitea_response(response: httpx.Response) -> None:
+def _validate_retryable_gitea_response(response: httpx2.Response) -> None:
     """Raise for transient Gitea HTTP responses that should be retried."""
     if response.status_code in {429, 502, 503, 504}:
         response.raise_for_status()
@@ -589,16 +593,16 @@ def _log_retrying_gitea_request(retry_state: RetryCallState) -> None:
 
 def _build_gitea_http_client(
     base_url: str, headers: dict[str, str]
-) -> httpx.AsyncClient:
-    """Create an httpx client with tenacity retry for transient Gitea failures."""
-    transport = AsyncTenacityTransport(
+) -> httpx2.AsyncClient:
+    """Create an httpx2 client with tenacity retry for transient Gitea failures."""
+    transport = AsyncHTTPX2TenacityTransport(
         config=RetryConfig(
             retry=retry_if_exception_type(
                 (
-                    httpx.HTTPStatusError,
-                    httpx.TimeoutException,
-                    httpx.ConnectError,
-                    httpx.ReadError,
+                    httpx2.HTTPStatusError,
+                    httpx2.TimeoutException,
+                    httpx2.ConnectError,
+                    httpx2.ReadError,
                 )
             ),
             wait=wait_retry_after(
@@ -610,7 +614,7 @@ def _build_gitea_http_client(
         ),
         validate_response=_validate_retryable_gitea_response,
     )
-    return httpx.AsyncClient(base_url=base_url, headers=headers, transport=transport)
+    return httpx2.AsyncClient(base_url=base_url, headers=headers, transport=transport)
 
 
 async def poll_forever(

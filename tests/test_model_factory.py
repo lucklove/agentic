@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import Mock
 
-import httpx
+import httpx2
 import pytest
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
@@ -78,7 +78,7 @@ def test_log_retrying_http_request_logs_exception(
     monkeypatch.setattr("model_factory.logfire.info", info)
     retry_state = RetryCallState(retry_object=Mock(), fn=None, args=(), kwargs={})
     retry_state.set_exception(
-        (type(httpx.ConnectError("boom")), httpx.ConnectError("boom"), None)
+        (type(httpx2.ConnectError("boom")), httpx2.ConnectError("boom"), None)
     )
     retry_state.next_action = RetryAction(3.5)
 
@@ -113,20 +113,20 @@ def test_validate_retryable_response_raises_for_retryable_statuses(
 ) -> None:
     from model_factory import _validate_retryable_response
 
-    response = Mock(spec=httpx.Response)
+    response = Mock(spec=httpx2.Response)
     response.status_code = status_code
     response.raise_for_status = Mock(
-        side_effect=httpx.HTTPStatusError("boom", request=Mock(), response=response)
+        side_effect=httpx2.HTTPStatusError("boom", request=Mock(), response=response)
     )
 
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(httpx2.HTTPStatusError):
         _validate_retryable_response(response)
 
 
 def test_validate_retryable_response_does_not_raise_for_other_statuses() -> None:
     from model_factory import _validate_retryable_response
 
-    response = Mock(spec=httpx.Response)
+    response = Mock(spec=httpx2.Response)
     response.status_code = 200
     response.raise_for_status = Mock()
 

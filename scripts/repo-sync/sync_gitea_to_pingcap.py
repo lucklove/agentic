@@ -3,7 +3,7 @@
 # requires-python = ">=3.14"
 # dependencies = []
 # ///
-"""Clone from Gitea and cherry-pick unsynced commits to GitHub via PRs."""
+"""Clone from Gitea.ai and cherry-pick unsynced commits to PingCAP via PRs."""
 
 from __future__ import annotations
 
@@ -19,26 +19,27 @@ CREDENTIAL_URL_RE = re.compile(r"(https?://)[^\s/@]+@")
 TRAILING_PR_RE = re.compile(r"\s*\(#[0-9]+\)\s*$")
 ISSUE_REF_RE = re.compile(r"(?<!\w)#[0-9]+\b")
 NON_SLUG_RE = re.compile(r"[^a-z0-9]+")
-SSH_GITHUB_URL_RE = re.compile(r"^[^@\s]+@github\.com:(.+?)(?:\.git)?$")
+SSH_PINGCAP_URL_RE = re.compile(r"^[^@\s]+@git\.pingcap\.net:(.+?)(?:\.git)?$")
+PINGCAP_LOGIN = "git.pingcap.net"
 
 
-def github_repo_name(github_url: str) -> str:
-    ssh_match = SSH_GITHUB_URL_RE.match(github_url)
+def pingcap_repo_name(pingcap_url: str) -> str:
+    ssh_match = SSH_PINGCAP_URL_RE.match(pingcap_url)
     if ssh_match:
         path = ssh_match.group(1)
         if path and "/" in path:
             return path
-    parts = urlsplit(github_url)
+    parts = urlsplit(pingcap_url)
     path = parts.path.removeprefix("/")
     if path.endswith(".git"):
         path = path[:-4]
     if not path or "/" not in path:
-        raise argparse.ArgumentTypeError(f"invalid GitHub repo URL: {github_url}")
+        raise argparse.ArgumentTypeError(f"invalid PingCAP repo URL: {pingcap_url}")
     return path
 
 
-def build_github_ssh_url(github_owner: str, repo: str) -> str:
-    return f"git@github.com:{github_owner}/{repo}.git"
+def build_pingcap_ssh_url(pingcap_owner: str, repo: str) -> str:
+    return f"git@git.pingcap.net:{pingcap_owner}/{repo}.git"
 
 
 def gitea_repo_name(gitea_url: str) -> str:
@@ -177,7 +178,7 @@ def validate_pr_text(
         )
     cleaned_body = rewrite_body(body, gitea_url_re)
     if cleaned_body != body.strip():
-        raise SystemExit("pull request body must not include Gitea links")
+        raise SystemExit("pull request body must not include Gitea.ai links")
     if ISSUE_REF_RE.search(cleaned_body):
         raise SystemExit(
             "pull request body must not include issue or pull-request numbers"
@@ -196,23 +197,35 @@ def log_titles(repo_dir: Path, ref: str) -> set[str]:
     return {core_title(line) for line in output.splitlines() if line.strip()}
 
 
-def open_pr_titles(github_repo: str) -> set[str]:
-    output = capture(
-        [
-            "gh",
-            "pr",
-            "list",
-            "--repo",
-            github_repo,
-            "--state",
-            "open",
-            "--json",
-            "title",
-            "--jq",
-            ".[] | .title",
-        ]
-    )
-    return {core_title(line) for line in output.splitlines() if line.strip()}
+def open_pr_titles(pingcap_repo: str) -> set[str]:
+    command = [
+        "tea",
+        "pulls",
+        "list",
+        "--login",
+        PINGCAP_LOGIN,
+        "--repo",
+        pingcap_repo,
+        "--state",
+        "open",
+        "--output",
+        "json",
+        "--fields",
+        "title",
+    ]
+    print("$ " + format_command(command))
+    result = subprocess_run(command, check=False, capture_output=True)
+    try:
+        payload = json.loads(result.stdout or "[]")
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"failed to parse tea pulls list output: {exc}") from exc
+    if not isinstance(payload, list):
+        raise SystemExit(f"unexpected tea pulls list output: {result.stdout!r}")
+    return {
+        core_title(str(item["title"]))
+        for item in payload
+        if isinstance(item, dict) and isinstance(item.get("title"), str)
+    }
 
 
 def gitea_commits(repo_dir: Path, main_branch: str) -> list[str]:
@@ -221,7 +234,7 @@ def gitea_commits(repo_dir: Path, main_branch: str) -> list[str]:
         "log",
         "--reverse",
         "--format=%H",
-        f"_github/{main_branch}.._gitea/{main_branch}",
+        f"_pingcap/{main_branch}.._gitea_ai/{main_branch}",
     )
     return [line for line in output.splitlines() if line.strip()]
 
@@ -249,50 +262,51 @@ def fetch_sync_state(
     git(
         args.repo_dir,
         "fetch",
-        "_github",
-        f"{args.main_branch}:refs/remotes/_github/{args.main_branch}",
+        "_pingcap",
+        f"{args.main_branch}:refs/remotes/_pingcap/{args.main_branch}",
     )
     git(
         args.repo_dir,
         "fetch",
-        "_gitea",
-        f"{args.main_branch}:refs/remotes/_gitea/{args.main_branch}",
+        "_gitea_ai",
+        f"{args.main_branch}:refs/remotes/_gitea_ai/{args.main_branch}",
     )
-    github_titles = log_titles(args.repo_dir, f"_github/{args.main_branch}")
-    pr_titles = open_pr_titles(args.github_repo)
+    pingcap_titles = log_titles(args.repo_dir, f"_pingcap/{args.main_branch}")
+    pr_titles = open_pr_titles(args.pingcap_repo)
     candidates: dict[str, tuple[str, str]] = {}
     for sha in gitea_commits(args.repo_dir, args.main_branch):
         original_title, original_body = commit_message(args.repo_dir, sha)
         rewritten_title = core_title(original_title)
-        if rewritten_title in github_titles or rewritten_title in pr_titles:
+        if rewritten_title in pingcap_titles or rewritten_title in pr_titles:
             continue
         candidates[sha] = (
             rewritten_title,
             rewrite_body(original_body, args.gitea_url_re),
         )
-    return github_titles, pr_titles, candidates
+    return pingcap_titles, pr_titles, candidates
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="List or sync unsynced Gitea commits to GitHub.",
+        description="List or sync unsynced Gitea.ai commits to PingCAP.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     def add_shared_arguments(command_parser: argparse.ArgumentParser) -> None:
         command_parser.add_argument("--repo-dir", required=True, type=Path)
         command_parser.add_argument("--gitea-url", required=True)
-        command_parser.add_argument("--github-owner", default="tidbcloud")
-        command_parser.add_argument("--github-repo")
+        command_parser.add_argument("--pingcap-owner", default="tidbcloud")
+        command_parser.add_argument("--pingcap-repo")
         command_parser.add_argument("--main-branch", default="main")
 
     list_parser = subparsers.add_parser(
-        "list", description="List unsynced Gitea commits that still need GitHub PRs."
+        "list",
+        description="List unsynced Gitea.ai commits that still need PingCAP PRs.",
     )
     add_shared_arguments(list_parser)
 
     sync_parser = subparsers.add_parser(
-        "sync", description="Sync one unsynced Gitea commit to GitHub as a PR."
+        "sync", description="Sync one unsynced Gitea.ai commit to PingCAP as a PR."
     )
     add_shared_arguments(sync_parser)
     sync_parser.add_argument("--commit", required=True)
@@ -302,9 +316,9 @@ def parse_args() -> argparse.Namespace:
 
     args = parser.parse_args()
     repo_name = gitea_repo_name(args.gitea_url).split("/")[-1]
-    args.github_url = build_github_ssh_url(args.github_owner, repo_name)
-    if not args.github_repo:
-        args.github_repo = f"{args.github_owner}/{repo_name}"
+    args.pingcap_url = build_pingcap_ssh_url(args.pingcap_owner, repo_name)
+    if not args.pingcap_repo:
+        args.pingcap_repo = f"{args.pingcap_owner}/{repo_name}"
     args.gitea_url_re = gitea_url_pattern(args.gitea_url)
     return args
 
@@ -315,11 +329,11 @@ def create_sync_pr(
     branch = f"sync/{slugify(title)}"
     current_branch = git_capture(repo_dir, "branch", "--show-current").strip()
     if current_branch == args.main_branch:
-        start_point = f"_github/{args.main_branch}"
+        start_point = f"_pingcap/{args.main_branch}"
         git(repo_dir, "checkout", "--detach", start_point)
         git(repo_dir, "checkout", "-b", branch)
     else:
-        git(repo_dir, "checkout", "-b", branch, f"_github/{args.main_branch}")
+        git(repo_dir, "checkout", "-b", branch, f"_pingcap/{args.main_branch}")
     cherry_pick = git(repo_dir, "cherry-pick", "--no-commit", sha, check=False)
     if cherry_pick.returncode != 0:
         git(repo_dir, "cherry-pick", "--abort", check=False)
@@ -336,7 +350,7 @@ def create_sync_pr(
         git(repo_dir, "reset", "--hard", "HEAD")
 
     push = run(
-        ["git", "-C", str(repo_dir), "push", "_github", branch],
+        ["git", "-C", str(repo_dir), "push", "_pingcap", branch],
         check=False,
         dry_run=args.dry_run,
     )
@@ -345,23 +359,25 @@ def create_sync_pr(
         return "skipped"
 
     pr_command = [
-        "gh",
-        "pr",
+        "tea",
+        "pulls",
         "create",
+        "--login",
+        PINGCAP_LOGIN,
         "--repo",
-        args.github_repo,
+        args.pingcap_repo,
         "--base",
         args.main_branch,
         "--head",
         branch,
         "--title",
         title,
-        "--body",
+        "--description",
         body,
     ]
     pr_create = run(pr_command, check=False, dry_run=args.dry_run)
     if pr_create is not None and pr_create.returncode != 0:
-        print("warning: gh pr create failed: " + format_command(pr_command))
+        print("warning: tea pulls create failed: " + format_command(pr_command))
         return "skipped"
 
     print(f"synced {sha} as {branch}: {title}")
@@ -374,13 +390,13 @@ def clone_from_gitea(repo_dir: Path, gitea_url: str) -> None:
 
 def list_commits(args: argparse.Namespace) -> None:
     clone_from_gitea(args.repo_dir, args.gitea_url)
-    add_remote(args.repo_dir, "_github", args.github_url)
-    add_remote(args.repo_dir, "_gitea", args.gitea_url)
+    add_remote(args.repo_dir, "_pingcap", args.pingcap_url)
+    add_remote(args.repo_dir, "_gitea_ai", args.gitea_url)
     try:
         _, _, candidates = fetch_sync_state(args)
     finally:
-        remove_remote(args.repo_dir, "_github")
-        remove_remote(args.repo_dir, "_gitea")
+        remove_remote(args.repo_dir, "_pingcap")
+        remove_remote(args.repo_dir, "_gitea_ai")
     print(
         json.dumps(
             [
@@ -401,24 +417,24 @@ def sync_commit(args: argparse.Namespace) -> None:
     clone_from_gitea(args.repo_dir, args.gitea_url)
     ensure_clean_worktree(args.repo_dir)
     pr_title, pr_body = validate_pr_text(args.pr_title, args.pr_body, args.gitea_url_re)
-    add_remote(args.repo_dir, "_github", args.github_url)
-    add_remote(args.repo_dir, "_gitea", args.gitea_url)
+    add_remote(args.repo_dir, "_pingcap", args.pingcap_url)
+    add_remote(args.repo_dir, "_gitea_ai", args.gitea_url)
     original_head = git_capture(
         args.repo_dir, "rev-parse", "--abbrev-ref", "HEAD"
     ).strip()
     if original_head == "HEAD":
         original_head = git_capture(args.repo_dir, "rev-parse", "HEAD").strip()
     try:
-        github_titles, pr_titles, candidates = fetch_sync_state(args)
+        pingcap_titles, pr_titles, candidates = fetch_sync_state(args)
         if args.commit not in candidates:
             raise SystemExit(
                 "commit is not eligible for sync; re-run the list command to refresh unsynced commits"
             )
-        if pr_title in github_titles:
-            raise SystemExit("pull request title already exists on GitHub main")
+        if pr_title in pingcap_titles:
+            raise SystemExit("pull request title already exists on PingCAP main")
         if pr_title in pr_titles:
             raise SystemExit(
-                "pull request title already exists in an open GitHub pull request"
+                "pull request title already exists in an open PingCAP pull request"
             )
         result = create_sync_pr(args.repo_dir, args.commit, pr_title, pr_body, args)
         if result != "synced":
@@ -426,8 +442,8 @@ def sync_commit(args: argparse.Namespace) -> None:
     finally:
         git(args.repo_dir, "checkout", original_head, check=False)
         git(args.repo_dir, "branch", "-D", f"sync/{slugify(pr_title)}", check=False)
-        remove_remote(args.repo_dir, "_github")
-        remove_remote(args.repo_dir, "_gitea")
+        remove_remote(args.repo_dir, "_pingcap")
+        remove_remote(args.repo_dir, "_gitea_ai")
 
 
 def main() -> None:
