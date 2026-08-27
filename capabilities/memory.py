@@ -2,7 +2,8 @@
 
 Provides tools for saving, recalling, searching, listing, and deleting
 key-value memories, with pluggable storage backends (`DictMemoryStore` for
-testing, `FileMemoryStore` for on-disk persistence).
+testing, `FileMemoryStore` for on-disk JSON persistence, `SqliteMemoryStore`
+for on-disk persistence with English-stemming FTS5 search).
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -557,6 +559,235 @@ class FileMemoryStore(_BaseDictStore):
         return existed
 
 
+class SqliteMemoryStore:
+    """SQLite + FTS5 store for on-disk persistence with English stemming search.
+
+    Backed by the `sqlite3` stdlib module; uses an FTS5 virtual table
+    with `tokenize='porter'` (English word stemming) so a query like
+    "save" matches indexed stems "save", "saving", "saved", "saves".
+    See `search` for the relevance-ranking details; namespace /
+    metadata / expiry filters and the `entry.importance` /
+    `recency_scorer` boosts behave like `_BaseDictStore.search`.
+    """
+
+    _SCHEMA = """
+        CREATE TABLE IF NOT EXISTS entries (
+            key TEXT PRIMARY KEY,
+            namespace_json TEXT NOT NULL,
+            content TEXT NOT NULL,
+            summary TEXT,
+            tags_json TEXT NOT NULL DEFAULT '[]',
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            importance REAL,
+            expires_at TEXT,
+            read_only INTEGER NOT NULL DEFAULT 0,
+            char_limit INTEGER,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
+            key,
+            content,
+            tokenize='porter'
+        );
+    """
+
+    def __init__(self, path: str | Path) -> None:
+        """Open or create a SQLite + FTS5 store at the given path."""
+        self._path = Path(path)
+        self._conn = sqlite3.connect(self._path)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.executescript(self._SCHEMA)
+
+    def _row_to_entry(self, row: sqlite3.Row) -> MemoryEntry:
+        """Decode a row from `entries` into a `MemoryEntry`."""
+        return MemoryEntry(
+            key=row["key"],
+            content=row["content"],
+            tags=json.loads(row["tags_json"]),
+            namespace=tuple(json.loads(row["namespace_json"])),
+            expires_at=row["expires_at"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            summary=row["summary"],
+            metadata=json.loads(row["metadata_json"]),
+            read_only=bool(row["read_only"]),
+            char_limit=row["char_limit"],
+            importance=row["importance"],
+        )
+
+    def get(self, key: str) -> MemoryEntry | None:
+        """Retrieve a non-expired memory entry by key, or None if absent."""
+        row = self._conn.execute(
+            "SELECT * FROM entries WHERE key = ?", (key,)
+        ).fetchone()
+        if row is None:
+            return None
+        entry = self._row_to_entry(row)
+        if entry.is_expired():
+            return None
+        return entry
+
+    def put(self, entry: MemoryEntry) -> None:
+        """Store or update a memory entry, keeping the FTS index in sync."""
+        with self._conn:
+            self._conn.execute(
+                """
+                INSERT INTO entries (
+                    key, namespace_json, content, summary,
+                    tags_json, metadata_json, importance,
+                    expires_at, read_only, char_limit,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    namespace_json = excluded.namespace_json,
+                    content = excluded.content,
+                    summary = excluded.summary,
+                    tags_json = excluded.tags_json,
+                    metadata_json = excluded.metadata_json,
+                    importance = excluded.importance,
+                    expires_at = excluded.expires_at,
+                    read_only = excluded.read_only,
+                    char_limit = excluded.char_limit,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    entry.key,
+                    json.dumps(list(entry.namespace)),
+                    entry.content,
+                    entry.summary,
+                    json.dumps(entry.tags),
+                    json.dumps(entry.metadata),
+                    entry.importance,
+                    entry.expires_at,
+                    int(entry.read_only),
+                    entry.char_limit,
+                    entry.created_at,
+                    entry.updated_at,
+                ),
+            )
+            # FTS5 has no UPSERT; manually replace the FTS row.
+            self._conn.execute("DELETE FROM entries_fts WHERE key = ?", (entry.key,))
+            self._conn.execute(
+                "INSERT INTO entries_fts (key, content) VALUES (?, ?)",
+                (entry.key, entry.content),
+            )
+
+    def delete(self, key: str) -> bool:
+        """Delete a memory entry from both the table and the FTS index."""
+        with self._conn:
+            cur = self._conn.execute("DELETE FROM entries WHERE key = ?", (key,))
+            self._conn.execute("DELETE FROM entries_fts WHERE key = ?", (key,))
+        return cur.rowcount > 0
+
+    def list_all(
+        self,
+        *,
+        namespace: tuple[str, ...] | None = None,
+        filter: dict[str, object] | None = None,
+    ) -> list[MemoryEntry]:
+        """Return all non-expired entries, filtered by namespace/metadata."""
+        result: list[MemoryEntry] = []
+        for row in self._conn.execute("SELECT * FROM entries"):
+            entry = self._row_to_entry(row)
+            if entry.is_expired():
+                continue
+            if namespace is not None and not _namespace_matches(
+                entry.namespace, namespace
+            ):
+                continue
+            if filter is not None and not _matches_filter(entry, filter):
+                continue
+            result.append(entry)
+        return result
+
+    def search(
+        self,
+        query: str,
+        *,
+        namespace: tuple[str, ...] | None = None,
+        filter: dict[str, object] | None = None,
+        recency_scorer: RecencyScorer | None = None,
+    ) -> list[MemoryEntry]:
+        """Search by FTS5 porter-stemmed match; bm25 ranks relevance.
+
+        Unlike `_BaseDictStore.search` (which uses word-boundary regex
+        against `key`/`content`/`tags`), this delegates candidate
+        selection and relevance ranking to FTS5 with the porter
+        stemmer: a query like "save" matches indexed stems "save",
+        "saving", "saved", "saves". Each surviving entry is scored as
+        ``-bm25(entries_fts) + entry.importance + recency_scorer(entry)``
+        — ``-bm25`` because lower BM25 means a stronger match in
+        FTS5 — then sorted by descending score.
+
+        `entry.importance` and `recency_scorer` retain the same role as
+        in `_BaseDictStore.search` (boost otherwise-tied entries);
+        namespace / metadata / expiry filters behave identically.
+        """
+        words = [w for w in re.findall(r"\w+", query.lower()) if w]
+        if not words:
+            return []
+        # Each word is a quoted FTS5 phrase; the trailing '*' enables
+        # prefix match on the porter stem (e.g. "save"* matches stems
+        # "save", "saving", "saved").
+        match_expr = " ".join(f'"{w}"*' for w in words)
+        try:
+            rows = self._conn.execute(
+                "SELECT e.*, bm25(entries_fts) AS _rank "
+                "FROM entries e "
+                "JOIN entries_fts f ON e.key = f.key "
+                "WHERE entries_fts MATCH ?",
+                (match_expr,),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            # FTS5 rejected the syntax (e.g. an empty match expression
+            # survived `words`); treat as no matches.
+            return []
+
+        scored: list[tuple[float, MemoryEntry]] = []
+        for row in rows:
+            entry = self._row_to_entry(row)
+            if entry.is_expired():
+                continue
+            if namespace is not None and not _namespace_matches(
+                entry.namespace, namespace
+            ):
+                continue
+            if filter is not None and not _matches_filter(entry, filter):
+                continue
+            # Lower BM25 = stronger match in FTS5; invert so higher = better.
+            score: float = -float(row["_rank"])
+            if entry.importance is not None:
+                score += entry.importance
+            if recency_scorer is not None:
+                score += recency_scorer(entry)
+            scored.append((score, entry))
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        return [entry for _, entry in scored]
+
+    def list_namespaces(
+        self,
+        *,
+        prefix: tuple[str, ...] | None = None,
+        suffix: tuple[str, ...] | None = None,
+        max_depth: int | None = None,
+    ) -> list[tuple[str, ...]]:
+        """Return unique non-expired entry namespaces, optionally filtered."""
+        seen: set[tuple[str, ...]] = set()
+        for row in self._conn.execute("SELECT namespace_json FROM entries"):
+            ns = tuple(json.loads(row["namespace_json"]))
+            if max_depth is not None:
+                ns = ns[:max_depth]
+            if prefix is not None and not _namespace_matches(ns, prefix):
+                continue
+            if suffix is not None and (
+                len(ns) < len(suffix) or ns[-len(suffix) :] != suffix
+            ):
+                continue
+            seen.add(ns)
+        return sorted(seen)
+
+
 def format_entry(entry: MemoryEntry, *, prefer_summary: bool = False) -> str:
     """Format a memory entry as a human-readable string.
 
@@ -689,8 +920,12 @@ class Memory(AbstractCapability[AgentDepsT]):
         """Create from spec arguments.
 
         Args:
-            backend: Storage backend, `"memory"` (default) or `"file"`.
-            path: File path for the `"file"` backend (default `".memories.json"`).
+            backend: Storage backend, one of `"memory"` (default; ephemeral
+                in-process dict), `"file"` (JSON file at `path`), or
+                `"sqlite"` (SQLite + FTS5 with English stemming at `path`).
+            path: File path for the `"file"` or `"sqlite"` backend. Default
+                `".memories.json"`; override to e.g. `".memories.db"` when
+                using `backend="sqlite"`.
             inject_memories_in_instructions: Whether to inject memories into the system prompt.
             max_instructions_memories: Maximum memories to inject into the system prompt.
             instructions_sort: Ranking policy for non-pinned memories in `build_instructions`.
@@ -701,9 +936,12 @@ class Memory(AbstractCapability[AgentDepsT]):
             store = DictMemoryStore()
         elif backend == "file":
             store = FileMemoryStore(path)
+        elif backend == "sqlite":
+            store = SqliteMemoryStore(path)
         else:
             raise ValueError(
-                f'Unknown memory backend: {backend!r}. Use "memory" or "file".'
+                f"Unknown memory backend: {backend!r}. "
+                'Use "memory", "file", or "sqlite".'
             )
         return cls(
             store=store,

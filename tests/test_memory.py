@@ -3,7 +3,9 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 
-from capabilities.memory import DictMemoryStore, Memory, MemoryEntry
+import pytest
+
+from capabilities.memory import DictMemoryStore, Memory, MemoryEntry, SqliteMemoryStore
 
 
 def test_memory_instructions_include_memory_hygiene_rules() -> None:
@@ -185,3 +187,183 @@ def test_from_spec_accepts_instructions_sort() -> None:
     assert (
         Memory.from_spec(instructions_sort="insertion").instructions_sort == "insertion"
     )
+
+
+# ── SqliteMemoryStore tests (issue #287) ───────────────────────────────────
+
+
+def _sqlite_entry(
+    key: str,
+    content: str,
+    *,
+    namespace: tuple[str, ...] = ("global",),
+    tags: list[str] | None = None,
+    metadata: dict[str, object] | None = None,
+    importance: float | None = None,
+    expires_at: str | None = None,
+    read_only: bool = False,
+) -> MemoryEntry:
+    """Build a `MemoryEntry` with explicit field overrides for SQLite tests."""
+    return MemoryEntry(
+        key=key,
+        content=content,
+        namespace=namespace,
+        tags=tags or [],
+        metadata=metadata or {},
+        importance=importance,
+        expires_at=expires_at,
+        read_only=read_only,
+    )
+
+
+def test_sqlite_store_round_trip(tmp_path) -> None:
+    """`put` then `get` returns the stored entry intact."""
+    store = SqliteMemoryStore(tmp_path / "mem.db")
+    entry = _sqlite_entry("k1", "hello world")
+    store.put(entry)
+    assert store.get("k1") == entry
+
+
+def test_sqlite_store_get_missing_returns_none(tmp_path) -> None:
+    store = SqliteMemoryStore(tmp_path / "mem.db")
+    assert store.get("missing") is None
+
+
+def test_sqlite_store_delete_removes_and_is_idempotent(tmp_path) -> None:
+    store = SqliteMemoryStore(tmp_path / "mem.db")
+    store.put(_sqlite_entry("k1", "hello"))
+    assert store.delete("k1") is True
+    assert store.get("k1") is None
+    assert store.delete("k1") is False
+
+
+def test_sqlite_store_put_overwrites_existing(tmp_path) -> None:
+    store = SqliteMemoryStore(tmp_path / "mem.db")
+    store.put(_sqlite_entry("k1", "first"))
+    store.put(_sqlite_entry("k1", "second"))
+    assert store.get("k1").content == "second"
+
+
+def test_sqlite_store_list_all_returns_all(tmp_path) -> None:
+    store = SqliteMemoryStore(tmp_path / "mem.db")
+    store.put(_sqlite_entry("a", "x"))
+    store.put(_sqlite_entry("b", "y"))
+    store.put(_sqlite_entry("c", "z"))
+    assert {e.key for e in store.list_all()} == {"a", "b", "c"}
+
+
+def test_sqlite_store_list_all_filters_by_namespace(tmp_path) -> None:
+    store = SqliteMemoryStore(tmp_path / "mem.db")
+    store.put(_sqlite_entry("a", "x", namespace=("agents", "planner")))
+    store.put(_sqlite_entry("b", "y", namespace=("agents", "worker")))
+    store.put(_sqlite_entry("c", "z", namespace=("global",)))
+    result = store.list_all(namespace=("agents",))
+    assert {e.key for e in result} == {"a", "b"}
+
+
+def test_sqlite_store_list_all_filters_by_metadata(tmp_path) -> None:
+    store = SqliteMemoryStore(tmp_path / "mem.db")
+    store.put(_sqlite_entry("a", "x", metadata={"kind": "bug"}))
+    store.put(_sqlite_entry("b", "y", metadata={"kind": "feature"}))
+    assert {e.key for e in store.list_all(filter={"kind": "bug"})} == {"a"}
+
+
+def test_sqlite_store_search_porter_stem_matches_inflections(tmp_path) -> None:
+    """FTS5 with `tokenize='porter'` matches `save` -> `saving`/`saved`/`saves`."""
+    store = SqliteMemoryStore(tmp_path / "mem.db")
+    store.put(_sqlite_entry("k1", "I am saving money wisely"))
+    for q in ("save", "saved", "saving", "saves"):
+        assert [e.key for e in store.search(q)] == ["k1"], q
+
+
+def test_sqlite_store_search_empty_query_returns_empty(tmp_path) -> None:
+    store = SqliteMemoryStore(tmp_path / "mem.db")
+    store.put(_sqlite_entry("k1", "hello"))
+    assert store.search("") == []
+    assert store.search("   ") == []
+
+
+def test_sqlite_store_search_no_match_returns_empty(tmp_path) -> None:
+    store = SqliteMemoryStore(tmp_path / "mem.db")
+    store.put(_sqlite_entry("k1", "hello"))
+    assert store.search("completely_unrelated_token") == []
+
+
+def test_sqlite_store_search_filters_by_namespace(tmp_path) -> None:
+    store = SqliteMemoryStore(tmp_path / "mem.db")
+    store.put(_sqlite_entry("a", "python rocks", namespace=("agents", "planner")))
+    store.put(_sqlite_entry("b", "python rocks", namespace=("agents", "worker")))
+    result = store.search("python", namespace=("agents", "planner"))
+    assert {e.key for e in result} == {"a"}
+
+
+def test_sqlite_store_search_adds_importance_boost(tmp_path) -> None:
+    """Entries with `importance` set rank above equal-bm25 entries."""
+    store = SqliteMemoryStore(tmp_path / "mem.db")
+    store.put(_sqlite_entry("a", "python programming", importance=10.0))
+    store.put(_sqlite_entry("b", "python programming"))
+    results = store.search("python")
+    assert [e.key for e in results] == ["a", "b"]
+
+
+def test_sqlite_store_search_adds_recency_scorer(tmp_path) -> None:
+    """`recency_scorer` is added on top of the FTS bm25 base score."""
+    store = SqliteMemoryStore(tmp_path / "mem.db")
+    store.put(_sqlite_entry("a", "python programming"))
+    store.put(_sqlite_entry("b", "python programming"))
+
+    def scorer(entry: MemoryEntry) -> float:
+        return 1.0 if entry.key == "b" else 0.0
+
+    results = store.search("python", recency_scorer=scorer)
+    assert results[0].key == "b"
+
+
+def test_sqlite_store_search_skips_expired_entries(tmp_path) -> None:
+    store = SqliteMemoryStore(tmp_path / "mem.db")
+    store.put(_sqlite_entry("a", "python", expires_at="2000-01-01T00:00:00+00:00"))
+    store.put(_sqlite_entry("b", "python"))
+    assert [e.key for e in store.search("python")] == ["b"]
+
+
+def test_sqlite_store_delete_removes_from_fts_index(tmp_path) -> None:
+    """Deleting an entry must remove it from the FTS index too."""
+    store = SqliteMemoryStore(tmp_path / "mem.db")
+    store.put(_sqlite_entry("k1", "I am saving money"))
+    store.delete("k1")
+    assert store.search("save") == []
+
+
+def test_sqlite_store_list_namespaces_unique(tmp_path) -> None:
+    store = SqliteMemoryStore(tmp_path / "mem.db")
+    store.put(_sqlite_entry("a", "x", namespace=("agents", "planner")))
+    store.put(_sqlite_entry("b", "y", namespace=("agents", "worker")))
+    store.put(_sqlite_entry("c", "z", namespace=("global",)))
+    assert store.list_namespaces() == [
+        ("agents", "planner"),
+        ("agents", "worker"),
+        ("global",),
+    ]
+
+
+def test_sqlite_store_list_namespaces_filters_by_prefix(tmp_path) -> None:
+    store = SqliteMemoryStore(tmp_path / "mem.db")
+    store.put(_sqlite_entry("a", "x", namespace=("agents", "planner")))
+    store.put(_sqlite_entry("b", "y", namespace=("agents", "worker")))
+    store.put(_sqlite_entry("c", "z", namespace=("global",)))
+    assert store.list_namespaces(prefix=("agents",)) == [
+        ("agents", "planner"),
+        ("agents", "worker"),
+    ]
+
+
+def test_from_spec_accepts_sqlite_backend(tmp_path) -> None:
+    """`Memory.from_spec(backend="sqlite")` returns a `SqliteMemoryStore`."""
+    memory = Memory.from_spec(backend="sqlite", path=str(tmp_path / "mem.db"))
+    assert isinstance(memory.store, SqliteMemoryStore)
+
+
+def test_from_spec_rejects_unknown_backend() -> None:
+    """Unknown backends still raise (now including the new `"sqlite"` option)."""
+    with pytest.raises(ValueError, match="Unknown memory backend"):
+        Memory.from_spec(backend="postgres")

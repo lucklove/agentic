@@ -88,8 +88,12 @@ class HarnessCapability(AbstractCapability[AgentDeps]):
             return await handler(args)
         try:
             result = await handler(args)
-        except Exception:
+        except Exception as e:
             ctx.deps.run_code_errored = True
+            e.add_note(
+                "memory hint: before retrying, call `search_memories` to look up whether "
+                "you have encountered this same problem before and how it was resolved."
+            )
             raise
 
         result.return_value = to_jsonable_python(result.return_value, fallback=str)

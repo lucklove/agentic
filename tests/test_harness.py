@@ -483,6 +483,69 @@ def test_wrap_tool_execute_marks_run_code_errored_on_exception(
     assert deps.run_code_errored is True
 
 
+def test_wrap_tool_execute_attaches_memory_hint_to_run_code_exception(
+    deps: AgentDeps,
+) -> None:
+    """``run_code`` exceptions get a ``memory hint`` note nudging the agent
+    to recall prior solutions via ``search_memories`` before retrying
+    (issue #287). The original message stays intact so existing
+    ``pytest.raises(RuntimeError, match=...)`` assertions keep working.
+    """
+    cap = HarnessCapability()
+    ctx = SimpleNamespace(deps=deps)
+    tool_def = SimpleNamespace(name="run_code")
+
+    async def handler(args: dict) -> None:
+        raise RuntimeError("sandbox error")
+
+    with pytest.raises(RuntimeError) as exc_info:
+        asyncio.run(
+            cap.wrap_tool_execute(
+                ctx,
+                call=SimpleNamespace(),
+                tool_def=tool_def,
+                args={},
+                handler=handler,
+            )
+        )
+
+    assert str(exc_info.value) == "sandbox error"
+    notes = getattr(exc_info.value, "__notes__", [])
+    assert any("memory hint" in n for n in notes), notes
+    assert any("search_memories" in n for n in notes), notes
+
+
+def test_wrap_tool_execute_attaches_memory_hint_to_model_retry(
+    deps: AgentDeps,
+) -> None:
+    """``ModelRetry`` raised from ``run_code`` also carries the hint note.
+
+    Regression pin: ``ModelRetry`` is the path ``run_code`` actually
+    uses today, so the hint must reach the agent even when no plain
+    ``Exception`` propagates.
+    """
+    cap = HarnessCapability()
+    ctx = SimpleNamespace(deps=deps)
+    tool_def = SimpleNamespace(name="run_code")
+
+    async def handler(args: dict) -> None:
+        raise ModelRetry("Runtime error: name 'x' is not defined")
+
+    with pytest.raises(ModelRetry) as exc_info:
+        asyncio.run(
+            cap.wrap_tool_execute(
+                ctx,
+                call=SimpleNamespace(),
+                tool_def=tool_def,
+                args={},
+                handler=handler,
+            )
+        )
+
+    notes = getattr(exc_info.value, "__notes__", [])
+    assert any("memory hint" in n for n in notes), notes
+
+
 def test_wrap_tool_execute_propagates_keyboard_interrupt_unchanged(
     deps: AgentDeps,
 ) -> None:
