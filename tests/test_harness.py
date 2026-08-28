@@ -486,10 +486,14 @@ def test_wrap_tool_execute_marks_run_code_errored_on_exception(
 def test_wrap_tool_execute_attaches_memory_hint_to_run_code_exception(
     deps: AgentDeps,
 ) -> None:
-    """``run_code`` exceptions get a ``memory hint`` note nudging the agent
-    to recall prior solutions via ``search_memories`` before retrying
-    (issue #287). The original message stays intact so existing
-    ``pytest.raises(RuntimeError, match=...)`` assertions keep working.
+    """``run_code`` exceptions get a memory hint note nudging the
+    agent to recall prior solutions before retrying (issue #287).
+    Non-``ModelRetry`` exceptions keep the hint as an ``add_note``;
+    ``ModelRetry`` (the actual ``run_code`` path) gets the hint
+    mutated into ``.message`` instead because pydantic-ai ignores
+    ``__notes__`` for that branch. The original message stays
+    intact so existing ``pytest.raises(RuntimeError, match=...)``
+    assertions keep working.
     """
     cap = HarnessCapability()
     ctx = SimpleNamespace(deps=deps)
@@ -511,18 +515,22 @@ def test_wrap_tool_execute_attaches_memory_hint_to_run_code_exception(
 
     assert str(exc_info.value) == "sandbox error"
     notes = getattr(exc_info.value, "__notes__", [])
-    assert any("memory hint" in n for n in notes), notes
-    assert any("search_memories" in n for n in notes), notes
+    assert any("recall memories" in n for n in notes), notes
 
 
 def test_wrap_tool_execute_attaches_memory_hint_to_model_retry(
     deps: AgentDeps,
 ) -> None:
-    """``ModelRetry`` raised from ``run_code`` also carries the hint note.
+    """``ModelRetry`` raised from ``run_code`` carries the memory
+    hint in its ``.message`` attribute.
 
-    Regression pin: ``ModelRetry`` is the path ``run_code`` actually
-    uses today, so the hint must reach the agent even when no plain
-    ``Exception`` propagates.
+    Regression pin for issue #287: pydantic-ai's
+    ``RetryPromptPart.from_error`` consumes ``ModelRetry.message``
+    directly and ignores ``__notes__`` from ``add_note()``, so
+    ``wrap_tool_execute`` mutates ``.message`` instead. The hint
+    sits in the description block; pydantic-ai then appends its
+    own ``"\n\nFix the errors and try again."`` suffix in
+    ``RetryPromptPart.model_response``.
     """
     cap = HarnessCapability()
     ctx = SimpleNamespace(deps=deps)
@@ -542,8 +550,8 @@ def test_wrap_tool_execute_attaches_memory_hint_to_model_retry(
             )
         )
 
-    notes = getattr(exc_info.value, "__notes__", [])
-    assert any("memory hint" in n for n in notes), notes
+    assert exc_info.value.message.startswith("Runtime error: name 'x' is not defined")
+    assert "recall memories" in exc_info.value.message
 
 
 def test_wrap_tool_execute_propagates_keyboard_interrupt_unchanged(

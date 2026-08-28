@@ -90,10 +90,22 @@ class HarnessCapability(AbstractCapability[AgentDeps]):
             result = await handler(args)
         except Exception as e:
             ctx.deps.run_code_errored = True
-            e.add_note(
-                "memory hint: before retrying, call `search_memories` to look up whether "
-                "you have encountered this same problem before and how it was resolved."
-            )
+            # Append a memory hint so the model is nudged to recall
+            # similar fixes before retrying. `add_note()` does NOT
+            # reach the model for ``ModelRetry`` (the path
+            # ``run_code`` actually uses): pydantic-ai's
+            # ``RetryPromptPart.from_error`` reads
+            # ``ModelRetry.message`` directly and ignores
+            # ``__notes__``. Mutate ``.message`` instead so the
+            # hint lands inside the description
+            # ``RetryPromptPart.model_response()`` then hands to
+            # the model; its own ``"\n\nFix the errors and try
+            # again."`` suffix is appended below our hint.
+            hint = "You can recall memories to help you fix the errors."
+            if isinstance(e, ModelRetry):
+                e.message += " " + hint
+            else:
+                e.add_note(hint)
             raise
 
         result.return_value = to_jsonable_python(result.return_value, fallback=str)
