@@ -103,7 +103,7 @@ class HarnessCapability(AbstractCapability[AgentDeps]):
             # again."`` suffix is appended below our hint.
             hint = "You can recall memories to help you fix the errors."
             if isinstance(e, ModelRetry):
-                e.message += " " + hint
+                e.message += "\n" + hint
             else:
                 e.add_note(hint)
             raise
