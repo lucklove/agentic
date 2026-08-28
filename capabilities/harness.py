@@ -9,6 +9,7 @@ from typing import Any
 
 from pydantic_ai import ModelRetry
 from pydantic_ai.capabilities import AbstractCapability
+from pydantic_ai.exceptions import ToolRetryError
 from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.tools import RunContext, Tool
 from pydantic_ai.toolsets.function import FunctionToolset
@@ -90,20 +91,30 @@ class HarnessCapability(AbstractCapability[AgentDeps]):
             result = await handler(args)
         except Exception as e:
             ctx.deps.run_code_errored = True
-            # Append a memory hint so the model is nudged to recall
-            # similar fixes before retrying. `add_note()` does NOT
-            # reach the model for ``ModelRetry`` (the path
-            # ``run_code`` actually uses): pydantic-ai's
-            # ``RetryPromptPart.from_error`` reads
-            # ``ModelRetry.message`` directly and ignores
-            # ``__notes__``. Mutate ``.message`` instead so the
-            # hint lands inside the description
-            # ``RetryPromptPart.model_response()`` then hands to
-            # the model; its own ``"\n\nFix the errors and try
-            # again."`` suffix is appended below our hint.
-            hint = "You can recall memories to help you fix the errors."
-            if isinstance(e, ModelRetry):
-                e.message += "\n" + hint
+            # Attach a memory hint so the model is nudged to recall
+            # similar fixes before retrying. The handler here is
+            # ``ToolManager._run_execute_hooks``'s ``do_execute``,
+            # which calls ``ToolManager._raw_execute``. ``_raw_execute``
+            # catches ``ModelRetry`` raised by the tool function and
+            # wraps it into a ``ToolRetryError`` carrying a
+            # ``RetryPromptPart`` whose ``.content`` was snapshotted
+            # from ``ModelRetry.message`` *before* this hook fires.
+            # So ``e.message += hint`` mutates a string that has
+            # already been frozen into ``RetryPromptPart.content``;
+            # ``add_note`` is also dropped on the floor.
+            #
+            # The fix: when we see a ``ToolRetryError`` with a string
+            # content (the production path), mutate
+            # ``e.tool_retry.content`` in place. When we see a bare
+            # ``ModelRetry`` (only happens in isolated unit tests that
+            # call this hook with a synthetic handler), mutate
+            # ``.message`` so those tests still pass. Anything else
+            # falls back to ``add_note``.
+            hint = "\n\nYou can recall memories to help you fix the errors."
+            if isinstance(e, ToolRetryError) and isinstance(e.tool_retry.content, str):
+                e.tool_retry.content += hint
+            elif isinstance(e, ModelRetry):
+                e.message += hint
             else:
                 e.add_note(hint)
             raise

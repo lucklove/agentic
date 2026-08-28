@@ -552,6 +552,79 @@ def test_wrap_tool_execute_attaches_memory_hint_to_model_retry(
 
     assert exc_info.value.message.startswith("Runtime error: name 'x' is not defined")
     assert "recall memories" in exc_info.value.message
+    # Hint is preceded by two newlines so it visually separates from the traceback.
+    assert "\n\nYou can recall memories" in exc_info.value.message
+
+
+def test_wrap_tool_execute_attaches_memory_hint_end_to_end_through_tool_manager(
+    deps: AgentDeps,
+) -> None:
+    """End-to-end regression for issue #287: drive a real
+    ``ToolManager._run_execute_hooks`` (the path the Agent loop
+    actually takes) with a tool function that raises ``ModelRetry``
+    and assert that the hint lands in
+    ``ToolRetryError.tool_retry.content`` -- the field
+    ``RetryPromptPart.model_response`` then renders to the model.
+
+    PR #290's `e.message += "\n" + hint` mutation looks correct in
+    isolation but is dead end-to-end: ``ToolManager._raw_execute``
+    catches ``ModelRetry`` and wraps it into ``ToolRetryError``
+    *before* ``wrap_tool_execute`` fires, snapshotting
+    ``ModelRetry.message`` into ``RetryPromptPart.content`` along
+    the way. The unit test passed only because it called
+    ``cap.wrap_tool_execute(handler=...)`` with a synthetic handler
+    that raised ``ModelRetry`` directly, bypassing ``_raw_execute``.
+    """
+    from pydantic_ai._run_context import RunContext
+    from pydantic_ai.exceptions import ToolRetryError
+    from pydantic_ai.messages import ToolCallPart
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.tool_manager import ToolManager, ValidatedToolCall
+    from pydantic_ai.tools import Tool
+    from pydantic_ai.toolsets.function import FunctionToolset
+    from pydantic_ai.usage import RunUsage
+
+    async def run_code(code: str) -> str:
+        raise ModelRetry("Runtime error:\nNameError: name 'x' is not defined")
+
+    toolset = FunctionToolset([Tool(run_code, takes_ctx=False, max_retries=2)])
+    cap = HarnessCapability()
+    tm = ToolManager(toolset=toolset, root_capability=cap)
+
+    ctx = RunContext(
+        model=TestModel(),
+        deps=deps,
+        usage=RunUsage(),
+        tool_manager=tm,
+    )
+    tm.ctx = ctx
+    tm.tools = asyncio.run(toolset.get_tools(ctx))
+    tool = tm.tools["run_code"]
+
+    validated = ValidatedToolCall(
+        call=ToolCallPart(
+            tool_name="run_code",
+            args='{"code":"x"}',
+            tool_call_id="x",
+        ),
+        tool=tool,
+        ctx=ctx,
+        args_valid=True,
+        validated_args={"code": "x"},
+    )
+
+    with pytest.raises(ToolRetryError) as exc_info:
+        asyncio.run(tm._run_execute_hooks(validated, usage=RunUsage()))
+
+    content = exc_info.value.tool_retry.content
+    assert isinstance(content, str)
+    assert content.startswith("Runtime error:\nNameError")
+    assert "recall memories" in content
+    # Hint is preceded by two newlines so it visually separates from the traceback.
+    assert "\n\nYou can recall memories" in content
+    # And the model_response rendering includes the hint as well.
+    rendered = exc_info.value.tool_retry.model_response()
+    assert "recall memories" in rendered
 
 
 def test_wrap_tool_execute_propagates_keyboard_interrupt_unchanged(
